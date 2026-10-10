@@ -1,0 +1,52 @@
+# LoreMd — instance configuration.
+# Copy to config.yaml, then adapt. Any value can be overridden with an
+# environment variable LOREMD_<SECTION>__<KEY> (e.g. LOREMD_DATABASE__DSN).
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  # Public URL advertised to agents (used in the connection docs).
+  public_url: https://memory.acme.com
+
+database:
+  dsn: postgresql://loremd:loremd@postgres:5432/loremd
+
+spaces:
+  # Root of the git repositories. One subdirectory = one space.
+  root: /data/spaces
+  default_branch: main
+
+embeddings:
+  # fastembed (local, no key) or openai (OpenAI-compatible API).
+  provider: fastembed
+  model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+  dimensions: 384
+  # Only used when provider = openai.
+  api_base: https://api.openai.com/v1
+  api_key: null
+
+search:
+  default_limit: 8
+  max_limit: 50
+  # RRF (Reciprocal Rank Fusion) constant.
+  rrf_k: 60
+  # Minimum cosine similarity for a semantic hit to be kept. A keyword hit is
+  # always kept. When no hit is kept, search answers no_match. Recalibrate when
+  # changing models.
+  min_similarity: 0.4
+
+write:
+  max_bytes: 32768
+  # Above this cosine similarity, the existing memory is returned instead of
+  # creating a new one.
+  dedup_threshold: 0.93
+  detect_secrets: true
+
+git:
+  # Domain used to build the author email of agent commits.
+  author_email_domain: agents.loremd.local
+  # Automatic push to the remote after each commit (phase 2).
+  auto_push: false
+
+audit:
+  enabled: true
