@@ -1,0 +1,50 @@
+# LoreMd — configuration de l'instance.
+# Copier en config.yaml puis adapter. Toute valeur peut être surchargée par une
+# variable d'environnement LOREMD_<SECTION>__<CLE> (ex: LOREMD_DATABASE__DSN).
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  # URL publique annoncée aux agents (sert dans la doc de connexion).
+  public_url: https://memoire.acme.com
+
+database:
+  dsn: postgresql://loremd:loremd@postgres:5432/loremd
+
+spaces:
+  # Racine des dépôts git. Un sous-dossier = un espace.
+  root: /data/spaces
+  default_branch: main
+
+embeddings:
+  # fastembed (local, aucune clé) ou openai (API compatible OpenAI).
+  provider: fastembed
+  model: intfloat/multilingual-e5-small
+  dimensions: 384
+  # Utilisés uniquement si provider = openai.
+  api_base: https://api.openai.com/v1
+  api_key: null
+
+search:
+  default_limit: 8
+  max_limit: 50
+  # Constante de la fusion RRF (Reciprocal Rank Fusion).
+  rrf_k: 60
+  # En dessous de ce score fusionné, la recherche répond no_match.
+  min_score: 0.02
+
+write:
+  max_bytes: 32768
+  # Au-dessus de cette similarité cosinus, on renvoie la mémoire existante
+  # au lieu d'en créer une nouvelle.
+  dedup_threshold: 0.93
+  detect_secrets: true
+
+git:
+  # Domaine utilisé pour fabriquer l'email d'auteur des commits d'agents.
+  author_email_domain: agents.loremd.local
+  # Push automatique vers le remote après chaque commit (phase 2).
+  auto_push: false
+
+audit:
+  enabled: true

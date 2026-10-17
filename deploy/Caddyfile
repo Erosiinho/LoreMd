@@ -1,0 +1,25 @@
+{$LOREMD_DOMAIN} {
+	encode gzip
+
+	# Rate limit grossier au niveau du proxy ; le compte fin par token est
+	# fait côté application (phase 1).
+	@mcp path /mcp*
+	handle @mcp {
+		reverse_proxy app:8000
+	}
+
+	handle /healthz {
+		reverse_proxy app:8000
+	}
+
+	# La console d'administration arrive en phase 2 ; d'ici là, tout le reste
+	# est refusé pour réduire la surface exposée.
+	handle {
+		respond "LoreMd" 404
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
