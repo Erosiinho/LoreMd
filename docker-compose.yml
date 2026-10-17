@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-loremd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-loremd}
+      POSTGRES_DB: ${POSTGRES_DB:-loremd}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-loremd}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      LOREMD_CONFIG: /etc/loremd/config.yaml
+      LOREMD_DATABASE__DSN: >-
+        postgresql://${POSTGRES_USER:-loremd}:${POSTGRES_PASSWORD:-loremd}@postgres:5432/${POSTGRES_DB:-loremd}
+      LOREMD_BOOTSTRAP_TOKEN: ${LOREMD_BOOTSTRAP_TOKEN:-}
+    volumes:
+      - ./config.yaml:/etc/loremd/config.yaml:ro
+      # Les espaces : c'est la mémoire elle-même, à sauvegarder en priorité.
+      - spaces:/data/spaces
+      # Clé SSH de déploiement pour les remotes git (facultatif).
+      - ${SSH_KEY_DIR:-./deploy/ssh}:/home/loremd/.ssh:ro
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      LOREMD_DOMAIN: ${LOREMD_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  postgres-data:
+  spaces:
+  caddy-data:
+  caddy-config:

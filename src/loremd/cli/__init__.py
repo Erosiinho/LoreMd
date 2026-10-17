@@ -1,0 +1,1 @@
+"""CLI d'administration `loremd`."""
