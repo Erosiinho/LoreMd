@@ -1,0 +1,25 @@
+{$LOREMD_DOMAIN} {
+	encode gzip
+
+	# Coarse rate limit at the proxy; fine-grained per-token limits are
+	# handled by the application (phase 1).
+	@mcp path /mcp*
+	handle @mcp {
+		reverse_proxy app:8000
+	}
+
+	handle /healthz {
+		reverse_proxy app:8000
+	}
+
+	# The admin console arrives in phase 2; until then, everything else is
+	# rejected to reduce the exposed surface.
+	handle {
+		respond "LoreMd" 404
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
