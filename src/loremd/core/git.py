@@ -6,6 +6,7 @@ remote authentication exactly the way humans will.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -25,6 +26,28 @@ class Commit:
 
 _LOG_FORMAT = "%H%x1f%an%x1f%ae%x1f%aI%x1f%s"
 
+#: Fallback identity when a caller passes an empty name or email.
+FALLBACK_IDENTITY = ("loremd", "loremd@localhost")
+
+
+def identity_env(author_name: str, author_email: str) -> dict[str, str]:
+    """Environment forcing who signs a commit.
+
+    `-c user.name` is not enough: `GIT_AUTHOR_NAME` and friends already present
+    in the environment take precedence over any config, so a host that exports
+    them would silently sign every agent commit with its own identity. Setting
+    these variables explicitly is the only way to be sure the author is the
+    agent, which principle 5 of the plan requires.
+    """
+    name = author_name.strip() or FALLBACK_IDENTITY[0]
+    email = author_email.strip() or FALLBACK_IDENTITY[1]
+    return {
+        "GIT_AUTHOR_NAME": name,
+        "GIT_AUTHOR_EMAIL": email,
+        "GIT_COMMITTER_NAME": name,
+        "GIT_COMMITTER_EMAIL": email,
+    }
+
 
 class GitRepo:
     """A local git repository, i.e. a space."""
@@ -35,13 +58,14 @@ class GitRepo:
 
     # -- plumbing ------------------------------------------------------------
 
-    def run(self, *args: str, check: bool = True) -> str:
+    def run(self, *args: str, check: bool = True, env: dict[str, str] | None = None) -> str:
         result = subprocess.run(
             ["git", *args],
             cwd=self.path,
             capture_output=True,
             text=True,
             check=False,
+            env={**os.environ, **env} if env else None,
         )
         if check and result.returncode != 0:
             raise GitError(
@@ -93,20 +117,25 @@ class GitRepo:
         self.run("add", "--", *paths)
         if not self.run("diff", "--cached", "--name-only"):
             return None
-        self.run(
-            "-c",
-            f"user.name={author_name}",
-            "-c",
-            f"user.email={author_email}",
-            "commit",
-            "-m",
-            message,
-        )
+        self.run("commit", "-m", message, env=identity_env(author_name, author_email))
         return self.head()
 
     def head(self) -> str | None:
         sha = self.run("rev-parse", "HEAD", check=False)
         return sha or None
+
+    def has_commit(self, sha: str) -> bool:
+        """Whether a commit is still reachable in this repository.
+
+        A rebase or a force-push can make a previously indexed commit vanish;
+        the caller then has to fall back to a full reindex instead of diffing
+        against nothing.
+        """
+        if not sha:
+            return False
+        # --verify --quiet prints the resolved sha, or nothing when it is gone.
+        resolved = self.run("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}", check=False)
+        return bool(resolved)
 
     # -- reading -------------------------------------------------------------
 

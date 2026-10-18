@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from ..auth.authenticator import Authenticator
+from ..auth.ratelimit import RateLimiter
 from ..config import Settings, get_settings
 from ..db import Database
 from ..embeddings import EmbeddingProvider, build_provider
@@ -49,10 +50,20 @@ class Loremd:
         self.search = SearchService(
             self.db, self.spaces, self.embeddings, self.audit, self.settings
         )
-        self.auth = Authenticator(self.db, self.settings.bootstrap_token)
+        self.limiter = RateLimiter(
+            requests_per_minute=self.settings.limits.requests_per_minute,
+            burst=self.settings.limits.burst,
+        )
+        self.auth = Authenticator(self.db, self.settings.bootstrap_token, self.limiter)
 
     async def start(self, *, migrate: bool = True) -> None:
         self.settings.spaces.root.mkdir(parents=True, exist_ok=True)
+        if self.settings.bootstrap_token:
+            logger.warning(
+                "LOREMD_BOOTSTRAP_TOKEN is set: it grants read and write access to every "
+                "space, bypassing the tokens table. Create real agent tokens with "
+                "`loremd agent create` and unset it."
+            )
         await self.db.connect()
         if migrate:
             applied = await self.db.migrate(self.settings.embeddings.dimensions)
