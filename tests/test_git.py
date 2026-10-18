@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -118,3 +119,132 @@ def test_has_commit_distinguishes_known_from_vanished(repo: GitRepo) -> None:
 def test_failing_git_command_raises(repo: GitRepo) -> None:
     with pytest.raises(GitError):
         repo.run("checkout", "missing-branch")
+
+
+# ----------------------------------------------------------- sync primitives
+
+
+@pytest.fixture
+def remote(tmp_path: Path) -> Path:
+    path = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-b", "main", str(path)], check=True, capture_output=True
+    )
+    return path
+
+
+def human_clone(remote: Path, where: Path) -> GitRepo:
+    """A human's working copy of the remote, as Obsidian users have."""
+    subprocess.run(["git", "clone", str(remote), str(where)], check=True, capture_output=True)
+    clone = GitRepo(where)
+    clone.run("config", "user.name", "alice")
+    clone.run("config", "user.email", "alice@acme.com")
+    return clone
+
+
+def human_commit(clone: GitRepo, relative: str, content: str) -> None:
+    write(clone, relative, content)
+    clone.commit([relative], f"edit {relative}", author_name="alice", author_email="a@acme.com")
+
+
+def test_fetch_from_an_empty_remote_reports_no_branch(repo: GitRepo, remote: Path) -> None:
+    repo.set_remote(str(remote))
+
+    assert repo.fetch() is False
+
+
+def test_push_then_fetch_round_trip(repo: GitRepo, remote: Path, tmp_path: Path) -> None:
+    repo.set_remote(str(remote))
+    path = write(repo, "decisions/a.md", "v1")
+    repo.commit([path], "decision: a", author_name="agent", author_email="a@b.c")
+    repo.push()
+
+    clone = human_clone(remote, tmp_path / "alice")
+    human_commit(clone, "notes/b.md", "from alice")
+    clone.push()
+
+    assert repo.fetch() is True
+    assert repo.ahead_behind(repo.remote_ref()) == (0, 1)
+    repo.fast_forward(repo.remote_ref())
+    assert (repo.path / "notes/b.md").read_text() == "from alice"
+
+
+def test_rebase_replays_local_commits_on_the_remote(
+    repo: GitRepo, remote: Path, tmp_path: Path
+) -> None:
+    repo.set_remote(str(remote))
+    base = write(repo, "decisions/a.md", "v1")
+    repo.commit([base], "decision: a", author_name="agent", author_email="a@b.c")
+    repo.push()
+    clone = human_clone(remote, tmp_path / "alice")
+    human_commit(clone, "notes/human.md", "human note")
+    clone.push()
+    local = write(repo, "notes/agent.md", "agent note")
+    repo.commit([local], "note: agent", author_name="agent", author_email="a@b.c")
+
+    repo.fetch()
+    assert repo.ahead_behind(repo.remote_ref()) == (1, 1)
+    assert repo.rebase(repo.remote_ref())
+
+    assert repo.ahead_behind(repo.remote_ref()) == (1, 0)
+    assert (repo.path / "notes/human.md").exists()
+    # The agent stays the author of its rebased commit.
+    assert repo.history("notes/agent.md")[0].author == "agent"
+
+
+def test_a_conflicting_rebase_is_aborted_and_merge_exposes_both_sides(
+    repo: GitRepo, remote: Path, tmp_path: Path
+) -> None:
+    repo.set_remote(str(remote))
+    path = write(repo, "decisions/a.md", "v1\n")
+    repo.commit([path], "decision: a", author_name="agent", author_email="a@b.c")
+    repo.push()
+    clone = human_clone(remote, tmp_path / "alice")
+    human_commit(clone, path, "human version\n")
+    clone.push()
+    write(repo, path, "agent version\n")
+    repo.commit([path], "update: a", author_name="agent", author_email="a@b.c")
+    head = repo.head()
+
+    repo.fetch()
+    assert not repo.rebase(repo.remote_ref())
+    # Aborted: the repository is exactly as before.
+    assert repo.head() == head
+    assert (repo.path / path).read_text() == "agent version\n"
+
+    assert not repo.merge_no_commit(repo.remote_ref())
+    assert repo.unmerged_paths() == [path]
+    assert repo.stage_content(path, 2) == "agent version\n"
+    assert repo.stage_content(path, 3) == "human version\n"
+
+    repo.abort_merge()
+    assert repo.unmerged_paths() == []
+    assert repo.head() == head
+
+
+def test_clone_brings_an_existing_space(repo: GitRepo, remote: Path, tmp_path: Path) -> None:
+    repo.set_remote(str(remote))
+    path = write(repo, "facts/c.md", "fact")
+    repo.commit([path], "fact: c", author_name="agent", author_email="a@b.c")
+    repo.push()
+
+    copy = GitRepo(tmp_path / "copy")
+    copy.clone(str(remote))
+
+    assert (copy.path / path).read_text() == "fact"
+    assert copy.current_branch() == "main"
+
+
+def test_clone_of_an_empty_remote_lands_on_the_default_branch(
+    remote: Path, tmp_path: Path
+) -> None:
+    copy = GitRepo(tmp_path / "copy")
+    copy.clone(str(remote))
+
+    assert copy.head() is None
+    assert copy.current_branch() == "main"
+
+
+def test_clone_failure_is_a_git_error(tmp_path: Path) -> None:
+    with pytest.raises(GitError):
+        GitRepo(tmp_path / "copy").clone(str(tmp_path / "nowhere.git"))

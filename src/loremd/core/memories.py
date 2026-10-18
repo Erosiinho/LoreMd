@@ -6,7 +6,6 @@ deduplication, space lock, file, commit, index, audit.
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,7 +15,7 @@ from ..config import Settings
 from ..db import Database
 from ..db.repositories import MemoryIndexRepository
 from ..embeddings import EmbeddingProvider
-from ..errors import NotFound, SecretDetected, ValidationError
+from ..errors import ConflictError, NotFound, SecretDetected, ValidationError
 from ..ids import memory_filename, new_ulid
 from . import frontmatter, secrets
 from .audit import AuditService
@@ -25,8 +24,7 @@ from .indexer import Indexer
 from .locks import space_lock
 from .models import Frontmatter, IndexedMemory, Memory, MemoryStatus, MemoryType
 from .spaces import ResolvedSpace, SpaceService
-
-logger = logging.getLogger(__name__)
+from .sync import SyncService
 
 _EMAIL_UNSAFE = re.compile(r"[^a-z0-9._-]+")
 TITLE_MAX_LENGTH = 120
@@ -58,6 +56,14 @@ def derive_title(content: str) -> str:
 def author_email(agent_name: str, domain: str) -> str:
     local = _EMAIL_UNSAFE.sub("-", agent_name.lower()).strip("-") or "agent"
     return f"{local}@{domain}"
+
+
+def commit_identity(principal: Principal, domain: str) -> dict[str, str]:
+    """Who signs the commit: an admin with their own email, an agent with a derived one."""
+    return {
+        "author_name": principal.name,
+        "author_email": principal.email or author_email(principal.name, domain),
+    }
 
 
 def validate_content(content: str, *, max_bytes: int, detect_secrets: bool = True) -> str:
@@ -93,6 +99,7 @@ class MemoryService:
         embeddings: EmbeddingProvider,
         audit: AuditService,
         settings: Settings,
+        sync: SyncService | None = None,
     ) -> None:
         self._db = database
         self._spaces = spaces
@@ -100,10 +107,24 @@ class MemoryService:
         self._embeddings = embeddings
         self._audit = audit
         self._settings = settings
+        self._sync = sync
+
+    def identity(self, principal: Principal) -> dict[str, str]:
+        return commit_identity(principal, self._settings.git.author_email_domain)
+
+    @staticmethod
+    def review_required(resolved: ResolvedSpace, principal: Principal) -> bool:
+        """Review applies per space or per agent: either one is enough."""
+        return resolved.space.review_required or principal.review_required
+
+    def committed(self, resolved: ResolvedSpace) -> None:
+        """A commit landed in the space: push it in the background."""
+        if self._sync is not None:
+            self._sync.request_push(resolved.space)
 
     # -- validation ----------------------------------------------------------
 
-    def _validate_content(self, content: str) -> str:
+    def validate_body(self, content: str) -> str:
         return validate_content(
             content,
             max_bytes=self._settings.write.max_bytes,
@@ -112,7 +133,7 @@ class MemoryService:
 
     # -- reading -------------------------------------------------------------
 
-    async def _lookup(self, principal: Principal, memory_id: str) -> IndexedMemory:
+    async def lookup(self, principal: Principal, memory_id: str) -> IndexedMemory:
         """Finds a memory among the token's spaces, without auditing a read.
 
         A memory outside the token's spaces is reported as missing rather than
@@ -131,7 +152,7 @@ class MemoryService:
 
     async def get(self, principal: Principal, memory_id: str) -> IndexedMemory:
         principal.require_scope(Scope.READ)
-        memory = await self._lookup(principal, memory_id)
+        memory = await self.lookup(principal, memory_id)
         await self._audit.record(
             principal, "memory_get", target=memory_id, space_id=memory.space_id
         )
@@ -139,7 +160,7 @@ class MemoryService:
 
     async def history(self, principal: Principal, memory_id: str) -> list[Commit]:
         principal.require_scope(Scope.READ)
-        indexed = await self._lookup(principal, memory_id)
+        indexed = await self.lookup(principal, memory_id)
         resolved = await self._spaces.resolve(indexed.space, principal)
         commits = resolved.repo.history(indexed.path)
         await self._audit.record(
@@ -147,7 +168,7 @@ class MemoryService:
         )
         return commits
 
-    async def _load_file(self, resolved: ResolvedSpace, indexed: IndexedMemory) -> Memory:
+    async def load_file(self, resolved: ResolvedSpace, indexed: IndexedMemory) -> Memory:
         file_path = resolved.path / indexed.path
         if not file_path.exists():
             raise NotFound(
@@ -173,7 +194,7 @@ class MemoryService:
     ) -> WriteResult:
         principal.require_scope(Scope.WRITE)
         resolved = await self._spaces.resolve(space_slug, principal)
-        body = self._validate_content(content)
+        body = self.validate_body(content)
         final_title = (title or derive_title(body)).strip()
 
         now = datetime.now(UTC)
@@ -188,7 +209,7 @@ class MemoryService:
                 project=project,
                 tags=tags or [],
                 status=MemoryStatus.PENDING
-                if resolved.space.review_required
+                if self.review_required(resolved, principal)
                 else MemoryStatus.ACTIVE,
                 verified=False,
                 source=source,
@@ -240,12 +261,7 @@ class MemoryService:
         async with space_lock(resolved.slug, resolved.path):
             frontmatter.write_file(resolved.path / relative_path, candidate)
             commit = resolved.repo.commit(
-                [relative_path],
-                f"{memory_type.value}: {final_title}",
-                author_name=principal.name,
-                author_email=author_email(
-                    principal.name, self._settings.git.author_email_domain
-                ),
+                [relative_path], f"{memory_type.value}: {final_title}", **self.identity(principal)
             )
             await self._indexer.index_memory(resolved.space, candidate)
             await self._spaces.set_last_indexed_commit(resolved.space, commit)
@@ -257,7 +273,7 @@ class MemoryService:
             space_id=resolved.space.id,
             meta={"path": relative_path, "commit": commit, "type": memory_type.value},
         )
-        self._maybe_push(resolved)
+        self.committed(resolved)
         return WriteResult(
             memory=candidate,
             created=True,
@@ -286,22 +302,25 @@ class MemoryService:
         principal.require_scope(Scope.WRITE)
         if not reason.strip():
             raise ValidationError("reason is required: it becomes the commit message")
-        indexed = await self._lookup(principal, memory_id)
+        indexed = await self.lookup(principal, memory_id)
+        _refuse_conflict(indexed)
         resolved = await self._spaces.resolve(indexed.space, principal)
-        body = self._validate_content(content)
+        body = self.validate_body(content)
+        review = self.review_required(resolved, principal)
 
         async with space_lock(resolved.slug, resolved.path):
-            memory = await self._load_file(resolved, indexed)
+            memory = await self.load_file(resolved, indexed)
             memory.content = body
             memory.frontmatter.updated = datetime.now(UTC)
+            # What a human verified is the old text: the new one is a claim again.
+            memory.frontmatter.verified = False
+            if review:
+                memory.frontmatter.status = MemoryStatus.PENDING
             frontmatter.write_file(resolved.path / memory.path, memory)
             commit = resolved.repo.commit(
                 [memory.path],
                 f"update: {memory.frontmatter.title} — {reason.strip()}",
-                author_name=principal.name,
-                author_email=author_email(
-                    principal.name, self._settings.git.author_email_domain
-                ),
+                **self.identity(principal),
             )
             await self._indexer.index_memory(resolved.space, memory)
             await self._spaces.set_last_indexed_commit(resolved.space, commit)
@@ -313,8 +332,8 @@ class MemoryService:
             space_id=resolved.space.id,
             meta={"reason": reason.strip(), "commit": commit},
         )
-        self._maybe_push(resolved)
-        return WriteResult(memory=memory, created=False, commit=commit)
+        self.committed(resolved)
+        return WriteResult(memory=memory, created=False, commit=commit, pending=review)
 
     async def supersede(
         self, principal: Principal, memory_id: str, new_content: str, reason: str
@@ -323,9 +342,11 @@ class MemoryService:
         principal.require_scope(Scope.WRITE)
         if not reason.strip():
             raise ValidationError("reason is required: it becomes the commit message")
-        indexed = await self._lookup(principal, memory_id)
+        indexed = await self.lookup(principal, memory_id)
+        _refuse_conflict(indexed)
         resolved = await self._spaces.resolve(indexed.space, principal)
-        body = self._validate_content(new_content)
+        body = self.validate_body(new_content)
+        review = self.review_required(resolved, principal)
 
         now = datetime.now(UTC)
         new_id = new_ulid(int(now.timestamp() * 1000))
@@ -333,10 +354,16 @@ class MemoryService:
         new_path = f"{indexed.type.directory}/{memory_filename(title, new_id)}"
 
         async with space_lock(resolved.slug, resolved.path):
-            old = await self._load_file(resolved, indexed)
-            old.frontmatter.status = MemoryStatus.SUPERSEDED
-            old.frontmatter.updated = now
-            frontmatter.write_file(resolved.path / old.path, old)
+            old = await self.load_file(resolved, indexed)
+            changed = [new_path]
+            if not review:
+                # Under review the old memory stays active until the
+                # replacement is approved: searches never come back empty-handed
+                # in between.
+                old.frontmatter.status = MemoryStatus.SUPERSEDED
+                old.frontmatter.updated = now
+                frontmatter.write_file(resolved.path / old.path, old)
+                changed.append(old.path)
 
             replacement = Memory(
                 frontmatter=Frontmatter(
@@ -345,9 +372,7 @@ class MemoryService:
                     title=title,
                     project=indexed.project,
                     tags=indexed.tags,
-                    status=MemoryStatus.PENDING
-                    if resolved.space.review_required
-                    else MemoryStatus.ACTIVE,
+                    status=MemoryStatus.PENDING if review else MemoryStatus.ACTIVE,
                     verified=False,
                     source=f"supersedes {memory_id}",
                     author=principal.name,
@@ -362,14 +387,13 @@ class MemoryService:
             frontmatter.write_file(resolved.path / new_path, replacement)
 
             commit = resolved.repo.commit(
-                [old.path, new_path],
+                changed,
                 f"supersede: {title} — {reason.strip()}",
-                author_name=principal.name,
-                author_email=author_email(
-                    principal.name, self._settings.git.author_email_domain
-                ),
+                **self.identity(principal),
             )
-            await self._indexer.index_memories(resolved.space, [old, replacement])
+            await self._indexer.index_memories(
+                resolved.space, [replacement] if review else [old, replacement]
+            )
             await self._spaces.set_last_indexed_commit(resolved.space, commit)
 
         await self._audit.record(
@@ -379,21 +403,19 @@ class MemoryService:
             space_id=resolved.space.id,
             meta={"supersedes": memory_id, "reason": reason.strip(), "commit": commit},
         )
-        self._maybe_push(resolved)
+        self.committed(resolved)
         return WriteResult(
             memory=replacement,
             created=True,
             commit=commit,
-            pending=replacement.frontmatter.status is MemoryStatus.PENDING,
+            pending=review,
         )
 
-    # -- remote --------------------------------------------------------------
 
-    def _maybe_push(self, resolved: ResolvedSpace) -> None:
-        """Best-effort push to the remote (robust sync comes in phase 2)."""
-        if not self._settings.git.auto_push or not resolved.repo.has_remote():
-            return
-        try:
-            resolved.repo.push()
-        except Exception:  # noqa: BLE001 - the remote must not block the write
-            logger.warning("could not push to the remote for %s", resolved.slug, exc_info=True)
+def _refuse_conflict(memory: IndexedMemory) -> None:
+    """Two versions of this memory wait for a human: an agent must not pick one."""
+    if memory.status is MemoryStatus.CONFLICT:
+        raise ConflictError(
+            f"memory {memory.id} is in conflict between two versions; a human has to "
+            "resolve it in the admin console before it can be changed"
+        )

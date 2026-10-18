@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from dataclasses import dataclass
+from ipaddress import ip_address
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -29,14 +30,24 @@ def current_context() -> CallContext:
     return _current.get() or _NO_CALL
 
 
-def _client_ip(scope: Scope) -> str | None:
+def valid_ip(value: str | None) -> str | None:
+    """The address if it is one, else None: it ends up in an `inet` column."""
+    if not value:
+        return None
+    try:
+        return str(ip_address(value.strip()))
+    except ValueError:
+        return None
+
+
+def client_ip(scope: Scope) -> str | None:
     headers = {key.decode().lower(): value.decode() for key, value in scope.get("headers", [])}
     forwarded = headers.get("x-forwarded-for")
     if forwarded:
         # Caddy puts the real client IP first in the list.
-        return forwarded.split(",")[0].strip()
+        return valid_ip(forwarded.split(",")[0])
     client = scope.get("client")
-    return client[0] if client else None
+    return valid_ip(client[0]) if client else None
 
 
 def _bearer(scope: Scope) -> str | None:
@@ -91,7 +102,7 @@ class CallContextMiddleware:
         if token is None:
             await _unauthorized(send)
             return
-        reset = _current.set(CallContext(token=token, ip=_client_ip(scope)))
+        reset = _current.set(CallContext(token=token, ip=client_ip(scope)))
         try:
             await self.app(scope, receive, send)
         finally:

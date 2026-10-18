@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>{% block title %}Console{% endblock %} · LoreMd</title>
+  <link rel="stylesheet" href="{{ prefix }}/static/console.css">
+</head>
+<body>
+  <header>
+    <a class="brand" href="{{ prefix }}">LoreMd</a>
+    {% if session %}
+    <nav>
+      <a href="{{ prefix }}">Spaces</a>
+      <a href="{{ prefix }}/review">Review</a>
+      <a href="{{ prefix }}/conflicts">Conflicts</a>
+      {% if session.is_admin %}<a href="{{ prefix }}/audit">Audit</a>{% endif %}
+    </nav>
+    <form class="logout" method="post" action="{{ prefix }}/logout">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <span>{{ session.email }} · {{ session.role.value }}</span>
+      <button type="submit" class="link">Log out</button>
+    </form>
+    {% endif %}
+  </header>
+  <main>
+    {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

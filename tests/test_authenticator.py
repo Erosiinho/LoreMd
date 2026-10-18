@@ -62,6 +62,7 @@ def token_row(**overrides: Any) -> tuple[str, dict[str, Any]]:
         "revoked_at": None,
         "agent_name": "codex-ci",
         "agent_disabled_at": None,
+        "agent_review_required": False,
     }
     row.update(overrides)
     return parts.raw, row
@@ -69,6 +70,14 @@ def token_row(**overrides: Any) -> tuple[str, dict[str, Any]]:
 
 async def authenticate(raw: str, row: dict[str, Any] | None, **kwargs: Any):
     return await Authenticator(FakeDatabase(row)).authenticate(raw, **kwargs)
+
+
+async def test_an_agent_under_review_carries_it_into_the_principal() -> None:
+    raw, row = token_row(agent_review_required=True)
+
+    principal = await authenticate(raw, row)
+
+    assert principal.review_required
 
 
 async def test_valid_token_yields_its_agent_and_spaces() -> None:

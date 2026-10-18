@@ -85,6 +85,21 @@ class Frontmatter(BaseModel):
             raise ValueError("title cannot be empty")
         return value.strip()
 
+    # Fields outside the frozen format (a human's own properties, the conflict
+    # links) live in the pydantic extras and are written back as is.
+
+    def extra(self, key: str) -> Any:
+        return (self.__pydantic_extra__ or {}).get(key)
+
+    def set_extra(self, key: str, value: Any) -> None:
+        if self.__pydantic_extra__ is None:
+            self.__pydantic_extra__ = {}
+        self.__pydantic_extra__[key] = value
+
+    def drop_extra(self, key: str) -> None:
+        if self.__pydantic_extra__:
+            self.__pydantic_extra__.pop(key, None)
+
 
 class Memory(BaseModel):
     """A memory: its frontmatter, its body, and where it lives."""
@@ -158,6 +173,8 @@ class Space(BaseModel):
     remote_url: str | None = None
     review_required: bool = False
     last_indexed_commit: str | None = None
+    last_synced_at: datetime | None = None
+    last_sync_error: str | None = None
 
 
 def content_hash(content: str) -> str:
