@@ -141,6 +141,8 @@ class SearchHit(BaseModel):
     score: float
     rank_text: int | None = None
     rank_vector: int | None = None
+    # Similarité cosinus avec la requête, si la mémoire a été trouvée côté vectoriel.
+    similarity: float | None = None
 
 
 class SearchResponse(BaseModel):

@@ -287,7 +287,7 @@ class MemoryIndexRepository:
                 ) t
             ),
             vector_hits AS (
-                SELECT id, row_number() OVER (ORDER BY distance ASC) AS rank
+                SELECT id, distance, row_number() OVER (ORDER BY distance ASC) AS rank
                 FROM (
                     SELECT f.id, f.embedding <=> ($2::text)::vector AS distance
                     FROM filtered f
@@ -301,11 +301,13 @@ class MemoryIndexRepository:
                     COALESCE(t.id, v.id) AS id,
                     t.rank AS rank_text,
                     v.rank AS rank_vector,
+                    1 - v.distance AS similarity,
                     COALESCE(1.0 / ($8 + t.rank), 0) + COALESCE(1.0 / ($8 + v.rank), 0) AS score
                 FROM text_hits t
                 FULL OUTER JOIN vector_hits v ON t.id = v.id
             )
-            SELECT {_MEMORY_COLUMNS}, fused.score, fused.rank_text, fused.rank_vector
+            SELECT {_MEMORY_COLUMNS}, fused.score, fused.rank_text, fused.rank_vector,
+                   fused.similarity
             FROM fused
             JOIN memory_index m ON m.id = fused.id
             JOIN spaces s ON s.id = m.space_id
@@ -328,6 +330,7 @@ class MemoryIndexRepository:
                 score=float(row["score"]),
                 rank_text=row["rank_text"],
                 rank_vector=row["rank_vector"],
+                similarity=float(row["similarity"]) if row["similarity"] is not None else None,
             )
             for row in rows
         ]

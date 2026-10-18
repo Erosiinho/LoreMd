@@ -19,7 +19,7 @@ spaces:
 embeddings:
   # fastembed (local, aucune clé) ou openai (API compatible OpenAI).
   provider: fastembed
-  model: intfloat/multilingual-e5-small
+  model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
   dimensions: 384
   # Utilisés uniquement si provider = openai.
   api_base: https://api.openai.com/v1
@@ -30,8 +30,10 @@ search:
   max_limit: 50
   # Constante de la fusion RRF (Reciprocal Rank Fusion).
   rrf_k: 60
-  # En dessous de ce score fusionné, la recherche répond no_match.
-  min_score: 0.02
+  # Similarité cosinus minimale pour qu'un résultat sémantique soit gardé. Un
+  # résultat trouvé par mots-clés est toujours gardé. Sans aucun résultat retenu,
+  # la recherche répond no_match. À recalibrer si l'on change de modèle.
+  min_similarity: 0.4
 
 write:
   max_bytes: 32768
