@@ -1,7 +1,7 @@
-"""Mise en forme des objets du core pour les réponses MCP.
+"""Formats core objects for MCP responses.
 
-Les outils renvoient du JSON simple : un agent doit pouvoir lire le résultat
-sans connaître les modèles internes.
+Tools return plain JSON: an agent must be able to read the result without
+knowing the internal models.
 """
 
 from __future__ import annotations
@@ -59,10 +59,10 @@ def hit_to_dict(hit: SearchHit) -> dict[str, Any]:
 
 def _matched_by(hit: SearchHit) -> str:
     if hit.rank_text is not None and hit.rank_vector is not None:
-        return "hybride"
+        return "hybrid"
     if hit.rank_text is not None:
-        return "mots-clés"
-    return "sémantique"
+        return "keyword"
+    return "semantic"
 
 
 def write_result_to_dict(result: WriteResult) -> dict[str, Any]:
@@ -81,13 +81,13 @@ def write_result_to_dict(result: WriteResult) -> dict[str, Any]:
         payload["duplicate_of"] = result.duplicate_of
         payload["similarity"] = round(result.similarity or 0.0, 4)
         payload["note"] = (
-            "Une mémoire quasi identique existait déjà ; elle est renvoyée telle quelle. "
-            "Utiliser memory_update pour la préciser ou memory_supersede pour la remplacer."
+            "A near-identical memory already existed; it is returned as is. "
+            "Use memory_update to refine it or memory_supersede to replace it."
         )
     if result.pending:
         payload["note"] = (
-            "L'espace exige une validation humaine : la mémoire est en status pending "
-            "et n'apparaîtra pas dans les recherches avant relecture."
+            "This space requires human review: the memory has status pending "
+            "and will not show up in searches until it is reviewed."
         )
     return payload
 

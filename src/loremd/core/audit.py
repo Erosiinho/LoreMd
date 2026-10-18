@@ -1,7 +1,7 @@
-"""Journal d'audit.
+"""Audit log.
 
-Chaque accès laisse une trace. Le journal est en ajout seul côté Postgres ;
-une erreur d'écriture ne doit jamais faire échouer l'opération métier.
+Every access leaves a trace. The log is append-only in Postgres; a failure to
+write it must never fail the business operation.
 """
 
 from __future__ import annotations
@@ -47,5 +47,5 @@ class AuditService:
                     ip=principal.ip,
                     meta=payload,
                 )
-        except Exception:  # noqa: BLE001 - l'audit ne doit pas casser l'appel
-            logger.exception("écriture du journal d'audit impossible (action=%s)", action)
+        except Exception:  # noqa: BLE001 - auditing must not break the call
+            logger.exception("could not write audit log entry (action=%s)", action)

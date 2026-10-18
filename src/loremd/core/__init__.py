@@ -1,4 +1,4 @@
-"""Core LoreMd : fichiers, commits, index, recherche, ACL, audit.
+"""LoreMd core: files, commits, index, search, ACL, audit.
 
-Le core ne connaît ni MCP ni HTTP. Les adaptateurs (api, cli) l'appellent.
+The core knows nothing about MCP or HTTP. The adapters (api, cli) call into it.
 """

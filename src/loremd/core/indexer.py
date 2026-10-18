@@ -1,7 +1,7 @@
-"""Reconstruction de l'index Postgres à partir des fichiers.
+"""Rebuilds the Postgres index from the files.
 
-L'index est jetable : `reindex` le refait entièrement, et le watcher
-n'applique que les fichiers modifiés depuis `last_indexed_commit`.
+The index is disposable: `reindex` rebuilds it entirely, and the watcher only
+applies files changed since `last_indexed_commit`.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ EMBED_BATCH_SIZE = 16
 
 @dataclass
 class IndexReport:
-    """Ce qu'une passe d'indexation a fait, pour l'afficher dans la CLI."""
+    """What an indexing pass did, for display in the CLI."""
 
     space: str
     indexed: int = 0
@@ -34,7 +34,7 @@ class IndexReport:
 
 
 def iter_memory_files(root: Path) -> list[Path]:
-    """Fichiers `.md` d'un espace, en ignorant README et dossiers techniques."""
+    """A space's `.md` files, skipping the README and internal directories."""
     files: list[Path] = []
     for directory in MEMORY_DIRECTORIES:
         base = root / directory
@@ -53,7 +53,7 @@ def is_memory_path(relative_path: str) -> bool:
 
 
 class Indexer:
-    """Lit les fichiers d'un espace et met l'index à jour."""
+    """Reads a space's files and updates the index."""
 
     def __init__(
         self,
@@ -68,7 +68,7 @@ class Indexer:
         self._settings = settings
 
     async def index_memories(self, space: Space, memories: list[Memory]) -> int:
-        """Indexe des mémoires déjà lues, par lots pour l'embedding."""
+        """Indexes already-parsed memories, batched for embedding."""
         count = 0
         for start in range(0, len(memories), EMBED_BATCH_SIZE):
             batch = memories[start : start + EMBED_BATCH_SIZE]
@@ -88,7 +88,7 @@ class Indexer:
             await MemoryIndexRepository(connection).delete_by_path(space.id, relative_path)
 
     async def reindex_space(self, space: Space, *, full: bool = True) -> IndexReport:
-        """Relit tous les fichiers de l'espace et remplace l'index."""
+        """Rereads every file in the space and replaces the index."""
         report = IndexReport(space=space.slug)
         root = Path(space.path)
         memories: list[Memory] = []
@@ -101,7 +101,7 @@ class Indexer:
                 )
             except ValidationError as exc:
                 report.skipped += 1
-                report.errors.append(f"{relative} : {exc}")
+                report.errors.append(f"{relative}: {exc}")
 
         if full:
             async with self._db.acquire() as connection:
@@ -116,10 +116,10 @@ class Indexer:
         return report
 
     async def sync_space(self, space: Space) -> IndexReport:
-        """Réindexe seulement ce qui a changé depuis `last_indexed_commit`.
+        """Reindexes only what changed since `last_indexed_commit`.
 
-        C'est le chemin utilisé après un pull : une édition faite dans Obsidian
-        arrive ici sous forme de diff git.
+        This is the path taken after a pull: an edit made in Obsidian arrives
+        here as a git diff.
         """
         repo = self._spaces.repo_for(space)
         head = repo.head()
@@ -150,7 +150,7 @@ class Indexer:
                 )
             except ValidationError as exc:
                 report.skipped += 1
-                report.errors.append(f"{relative} : {exc}")
+                report.errors.append(f"{relative}: {exc}")
 
         report.indexed = await self.index_memories(space, to_index)
         async with self._db.acquire() as connection:

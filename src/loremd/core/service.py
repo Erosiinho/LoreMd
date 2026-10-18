@@ -1,7 +1,7 @@
-"""Assemblage du core.
+"""Core assembly.
 
-Un seul objet à construire, que ce soit pour le serveur MCP ou pour la CLI.
-Il ne connaît ni HTTP ni MCP.
+A single object to build, for the MCP server and the CLI alike. It knows
+nothing about HTTP or MCP.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class Loremd:
-    """Point d'entrée du core : espaces, mémoires, recherche, index, audit."""
+    """Core entry point: spaces, memories, search, index, audit."""
 
     def __init__(
         self,
@@ -57,21 +57,21 @@ class Loremd:
         if migrate:
             applied = await self.db.migrate(self.settings.embeddings.dimensions)
             if applied:
-                logger.info("migrations appliquées : %s", ", ".join(applied))
+                logger.info("applied migrations: %s", ", ".join(applied))
         await self._check_embedding_dimensions()
 
     async def stop(self) -> None:
         await self.db.close()
 
     async def _check_embedding_dimensions(self) -> None:
-        """Un changement de modèle sans réindexation donnerait des scores faux."""
+        """Switching models without reindexing would produce wrong scores."""
         schema_dimensions = await self.db.embedding_dimensions()
         configured = self.settings.embeddings.dimensions
         if schema_dimensions is not None and schema_dimensions != configured:
             raise ConfigError(
-                f"la colonne embedding est en vector({schema_dimensions}) alors que la "
-                f"configuration déclare {configured} dimensions. Changer de modèle impose "
-                "une migration et un `loremd reindex`."
+                f"the embedding column is vector({schema_dimensions}) but the "
+                f"configuration declares {configured} dimensions. Changing models requires "
+                "a migration and a `loremd reindex`."
             )
 
     async def __aenter__(self) -> Loremd:

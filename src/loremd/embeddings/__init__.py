@@ -1,7 +1,7 @@
-"""Fournisseurs d'embeddings.
+"""Embedding providers.
 
-Par défaut fastembed, en local : aucune clé à fournir et les textes de mémoire
-ne quittent pas le serveur.
+Defaults to fastembed, running locally: no key to provide, and memory text
+never leaves the server.
 """
 
 from .base import EmbeddingProvider

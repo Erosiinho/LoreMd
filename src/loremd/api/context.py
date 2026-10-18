@@ -1,7 +1,7 @@
-"""Transport des informations d'appel jusqu'aux outils MCP.
+"""Carries call information down to the MCP tools.
 
-Le SDK MCP n'expose pas uniformément la requête HTTP aux outils ; un
-contextvar posé par un middleware ASGI reste le chemin le plus stable.
+The MCP SDK does not expose the HTTP request to tools consistently; a
+contextvar set by an ASGI middleware remains the most stable path.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def _client_ip(scope: Scope) -> str | None:
     headers = {key.decode().lower(): value.decode() for key, value in scope.get("headers", [])}
     forwarded = headers.get("x-forwarded-for")
     if forwarded:
-        # Caddy ajoute l'IP réelle en tête de liste.
+        # Caddy puts the real client IP first in the list.
         return forwarded.split(",")[0].strip()
     client = scope.get("client")
     return client[0] if client else None
@@ -48,7 +48,7 @@ def _bearer(scope: Scope) -> str | None:
 
 
 class CallContextMiddleware:
-    """Capte le token et l'IP de chaque requête HTTP."""
+    """Captures the token and IP of every HTTP request."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app

@@ -1,8 +1,8 @@
-"""Détection de secrets à l'écriture.
+"""Secret detection on write.
 
-Objectif : empêcher qu'un agent recopie une clé d'API dans la mémoire, pas
-remplacer un scanner complet. Le hook pre-receive des dépôts reste la seconde
-barrière (phase 3).
+The goal is to stop an agent from copying an API key into memory, not to
+replace a full scanner. The repositories' pre-receive hook remains the second
+line of defense (phase 3).
 """
 
 from __future__ import annotations
@@ -12,22 +12,22 @@ import re
 from dataclasses import dataclass
 
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("clé AWS", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
-    ("clé OpenAI", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
-    ("clé Anthropic", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
-    ("token GitHub", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
-    ("token GitLab", re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b")),
-    ("token Slack", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b")),
-    ("token LoreMd", re.compile(r"\blmd_[a-z0-9]{6,}_[A-Za-z0-9_-]{20,}\b")),
-    ("clé privée", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----")),
+    ("AWS key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    ("OpenAI key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
+    ("Anthropic key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
+    ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
+    ("GitLab token", re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b")),
+    ("Slack token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b")),
+    ("LoreMd token", re.compile(r"\blmd_[a-z0-9]{6,}_[A-Za-z0-9_-]{20,}\b")),
+    ("private key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----")),
     ("JWT", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
     (
-        "URL avec mot de passe",
+        "URL with password",
         re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s:/@]+:[^\s/@]{6,}@"),
     ),
 )
 
-#: `api_key = "…"`, `password: …` et variantes.
+#: `api_key = "…"`, `password: …` and variants.
 _ASSIGNMENT = re.compile(
     r"""(?ix)
     \b(?:api[_-]?key|secret|password|passwd|token|private[_-]?key|access[_-]?key)\b
@@ -36,7 +36,7 @@ _ASSIGNMENT = re.compile(
     """
 )
 
-#: Valeurs manifestement factices : on ne bloque pas la documentation.
+#: Obviously fake values: documentation must not be blocked.
 _PLACEHOLDERS = re.compile(
     r"(?i)^(?:x{4,}|\.{3,}|<[^>]+>|\$\{[^}]+\}|change[-_]?me|your[-_].*|"
     r"placeholder|example|redacted|dummy|todo|null|none)$"
@@ -67,7 +67,7 @@ def _mask(value: str) -> str:
 
 
 def scan(text: str) -> list[SecretFinding]:
-    """Retourne les secrets probables trouvés dans le texte."""
+    """Returns the likely secrets found in the text."""
     findings: list[SecretFinding] = []
     seen: set[str] = set()
 
@@ -82,9 +82,9 @@ def scan(text: str) -> list[SecretFinding]:
         value = match.group("value")
         if value in seen or _PLACEHOLDERS.match(value):
             continue
-        # Une affectation ne compte que si la valeur a l'air aléatoire.
+        # An assignment only counts if the value looks random.
         if _shannon_entropy(value) >= 3.5:
             seen.add(value)
-            findings.append(SecretFinding("valeur à forte entropie", _mask(value)))
+            findings.append(SecretFinding("high-entropy value", _mask(value)))
 
     return findings

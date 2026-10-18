@@ -1,4 +1,4 @@
-"""Gestion des espaces : un espace = un dossier = un dépôt git."""
+"""Space management: one space = one directory = one git repository."""
 
 from __future__ import annotations
 
@@ -20,25 +20,25 @@ SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 CONFIG_DIRNAME = ".loremd"
 CONFIG_FILENAME = "space.yaml"
 
-_README = """# Espace « {slug} »
+_README = """# Space "{slug}"
 
-Mémoire partagée gérée par LoreMd. Chaque fichier `.md` est une mémoire, et
-chaque modification est un commit.
+Shared memory managed by LoreMd. Every `.md` file is a memory, and every change
+is a commit.
 
-- `decisions/` — ce qui a été décidé, et pourquoi
-- `preferences/` — habitudes et goûts de l'équipe
-- `rules/` — contraintes à respecter
-- `facts/` — faits stables sur le projet
-- `notes/` — le reste
+- `decisions/` — what was decided, and why
+- `preferences/` — the team's habits and tastes
+- `rules/` — constraints to follow
+- `facts/` — stable facts about the project
+- `notes/` — everything else
 
-Ce dossier s'ouvre tel quel dans Obsidian. Les modifications poussées sur le
-remote sont réindexées par LoreMd.
+This folder opens as is in Obsidian. Changes pushed to the remote are
+reindexed by LoreMd.
 """
 
 
 @dataclass(frozen=True)
 class ResolvedSpace:
-    """Un espace et son dépôt, après vérification des droits du token."""
+    """A space and its repository, after checking the token's permissions."""
 
     space: Space
     repo: GitRepo
@@ -55,13 +55,13 @@ class ResolvedSpace:
 def validate_slug(slug: str) -> str:
     if not SLUG_PATTERN.match(slug):
         raise ValidationError(
-            "slug d'espace invalide : minuscules, chiffres et tirets, 63 caractères max"
+            "invalid space slug: lowercase letters, digits and hyphens, 63 characters max"
         )
     return slug
 
 
 class SpaceService:
-    """Création, résolution et configuration des espaces."""
+    """Creating, resolving and configuring spaces."""
 
     def __init__(self, database: Database, settings: Settings) -> None:
         self._db = database
@@ -81,7 +81,7 @@ class SpaceService:
         remote_url: str | None = None,
         review_required: bool = False,
     ) -> Space:
-        """Crée le dépôt, l'arborescence et la ligne d'index. Idempotent."""
+        """Creates the repository, the directory tree and the index row. Idempotent."""
         validate_slug(slug)
         path = self.path_for(slug)
         repo = GitRepo(path, default_branch=self._settings.spaces.default_branch)
@@ -106,7 +106,7 @@ class SpaceService:
 
         repo.commit(
             ["."],
-            f"chore: initialisation de l'espace {slug}",
+            f"chore: initialize space {slug}",
             author_name="loremd",
             author_email=f"loremd@{self._settings.git.author_email_domain}",
         )
@@ -126,7 +126,7 @@ class SpaceService:
     def write_space_config(
         self, path: Path, *, description: str | None, review_required: bool
     ) -> None:
-        """La config de l'espace vit dans le dépôt : les fichiers sont la vérité."""
+        """The space config lives in the repository: the files are the truth."""
         config_path = path / CONFIG_DIRNAME / CONFIG_FILENAME
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
@@ -148,11 +148,11 @@ class SpaceService:
         async with self._db.acquire() as connection:
             space = await SpaceRepository(connection).get_by_slug(slug)
         if space is None:
-            raise NotFound(f"espace inconnu : {slug}")
+            raise NotFound(f"unknown space: {slug}")
         return space
 
     async def resolve(self, slug: str, principal: Principal) -> ResolvedSpace:
-        """Récupère l'espace en vérifiant que le token y a droit."""
+        """Fetches the space, checking that the token is allowed to access it."""
         space = await self.get(slug)
         principal.require_space(space.id, space.slug)
         return ResolvedSpace(space=space, repo=self.repo_for(space))

@@ -1,4 +1,4 @@
-"""Identité authentifiée d'un appelant et ce qu'elle a le droit de faire."""
+"""Authenticated identity of a caller and what it is allowed to do."""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ class Scope(StrEnum):
 
 @dataclass(frozen=True)
 class Principal:
-    """Un agent (ou l'administrateur) derrière une requête.
+    """An agent (or the administrator) behind a request.
 
-    `space_ids = None` signifie « tous les espaces » : réservé au token
-    d'amorçage et aux appels administratifs depuis la CLI.
+    `space_ids = None` means "all spaces": reserved for the bootstrap token and
+    for administrative calls from the CLI.
     """
 
     name: str
@@ -38,14 +38,14 @@ class Principal:
 
     def require_scope(self, scope: Scope) -> None:
         if not self.has_scope(scope):
-            raise ForbiddenError(f"le token n'a pas le scope {scope.value}")
+            raise ForbiddenError(f"token lacks the {scope.value} scope")
 
     def can_access(self, space_id: UUID) -> bool:
         return self.space_ids is None or space_id in self.space_ids
 
     def require_space(self, space_id: UUID, slug: str) -> None:
         if not self.can_access(space_id):
-            raise ForbiddenError(f"espace non autorisé pour ce token : {slug}")
+            raise ForbiddenError(f"space not allowed for this token: {slug}")
 
     def filter_space_ids(self, available: list[UUID]) -> list[UUID]:
         if self.space_ids is None:

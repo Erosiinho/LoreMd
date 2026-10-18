@@ -1,7 +1,7 @@
-"""Fabrication et vérification des tokens.
+"""Token generation and verification.
 
-Format : `lmd_<prefix>_<secret>`. Seul le hachage SHA-256 du token complet est
-stocké ; le préfixe sert à retrouver la ligne sans révéler le secret.
+Format: `lmd_<prefix>_<secret>`. Only the SHA-256 hash of the full token is
+stored; the prefix is used to find the row without revealing the secret.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ class TokenParts:
 
 
 def generate_token() -> tuple[TokenParts, str]:
-    """Retourne le token en clair (à afficher une seule fois) et son hachage."""
+    """Returns the plaintext token (to be shown once) and its hash."""
     prefix = "".join(secrets.choice(PREFIX_ALPHABET) for _ in range(PREFIX_LENGTH))
     secret = secrets.token_urlsafe(SECRET_BYTES)
     parts = TokenParts(prefix=prefix, secret=secret)
@@ -41,7 +41,7 @@ def hash_token(raw: str) -> str:
 
 
 def parse_token(raw: str) -> TokenParts | None:
-    """Découpe un token présenté. Retourne None si le format ne colle pas."""
+    """Splits a presented token. Returns None if the format does not match."""
     pieces = raw.strip().split("_", 2)
     if len(pieces) != 3:
         return None

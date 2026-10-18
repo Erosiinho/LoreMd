@@ -1,13 +1,13 @@
 # Cline
 
-Dans les réglages MCP de l'extension (`cline_mcp_settings.json`) :
+In the extension's MCP settings (`cline_mcp_settings.json`):
 
 ```json
 {
   "mcpServers": {
     "loremd": {
       "type": "streamableHttp",
-      "url": "https://memoire.acme.com/mcp",
+      "url": "https://memory.acme.com/mcp",
       "headers": { "Authorization": "Bearer lmd_xxxxxxxx_…" },
       "disabled": false
     }
@@ -15,6 +15,5 @@ Dans les réglages MCP de l'extension (`cline_mcp_settings.json`) :
 }
 ```
 
-Laisser `memory_search` en approbation automatique et garder les écritures en
-approbation manuelle au début : c'est le meilleur moyen de voir ce que l'agent
-juge digne d'être mémorisé.
+Leave `memory_search` on auto-approve and keep writes on manual approval at
+first: it is the best way to see what the agent considers worth remembering.

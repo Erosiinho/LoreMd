@@ -1,4 +1,4 @@
-"""Index Postgres : pool de connexions, migrations, dépôts de données."""
+"""Postgres index: connection pool, migrations, data repositories."""
 
 from .engine import Database
 

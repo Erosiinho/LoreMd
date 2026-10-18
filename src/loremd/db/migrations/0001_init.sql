@@ -1,10 +1,10 @@
--- LoreMd — schéma d'index.
--- Postgres n'est qu'un index : spaces et memory_index sont entièrement
--- reconstructibles depuis les fichiers (`loremd reindex`). Seules agents,
--- tokens et audit_log portent de la donnée propre.
+-- LoreMd — index schema.
+-- Postgres is only an index: spaces and memory_index can be fully rebuilt
+-- from the files (`loremd reindex`). Only agents, tokens and audit_log hold
+-- data of their own.
 --
--- __EMBEDDING_DIM__ est remplacé à l'application de la migration par la
--- dimension du modèle d'embeddings configuré.
+-- __EMBEDDING_DIM__ is replaced, when the migration is applied, by the
+-- dimension of the configured embedding model.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS tokens (
 CREATE INDEX IF NOT EXISTS tokens_agent_idx ON tokens (agent_id);
 
 CREATE TABLE IF NOT EXISTS memory_index (
-    -- id = identifiant ULID du frontmatter, la source reste le fichier.
+    -- id = ULID from the frontmatter; the file remains the source of truth.
     id            text PRIMARY KEY,
     space_id      uuid NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
     path          text NOT NULL,
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     actor      text NOT NULL,
     action     text NOT NULL,
     target     text,
-    -- Pas de clé étrangère : le journal survit à la suppression d'un espace.
+    -- No foreign key: the log outlives a deleted space.
     space_id   uuid,
     ip         inet,
     meta       jsonb NOT NULL DEFAULT '{}',
@@ -89,6 +89,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS audit_created_idx ON audit_log (created_at DESC);
 CREATE INDEX IF NOT EXISTS audit_actor_idx ON audit_log (actor, created_at DESC);
 
--- Ajout seul : pas de UPDATE ni de DELETE sur le journal d'audit.
+-- Append-only: no UPDATE or DELETE on the audit log.
 CREATE OR REPLACE RULE audit_log_no_update AS ON UPDATE TO audit_log DO INSTEAD NOTHING;
 CREATE OR REPLACE RULE audit_log_no_delete AS ON DELETE TO audit_log DO INSTEAD NOTHING;

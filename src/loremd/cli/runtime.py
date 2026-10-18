@@ -1,4 +1,4 @@
-"""Plomberie partagée par les commandes : cycle de vie du core et affichage."""
+"""Plumbing shared by commands: core lifecycle and output."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ error_console = Console(stderr=True, style="bold red")
 
 T = TypeVar("T")
 
-#: Renseigné par le callback principal de l'application.
+#: Set by the application's main callback.
 CONFIG_PATH: Path | None = None
 
 
@@ -30,7 +30,7 @@ def settings() -> Settings:
 def run_with_core(
     operation: Callable[[Loremd], Awaitable[T]], *, migrate: bool = True
 ) -> T:
-    """Démarre le core, exécute l'opération, et traduit les erreurs du domaine."""
+    """Starts the core, runs the operation, and translates domain errors."""
 
     async def main() -> T:
         core = Loremd(settings())
@@ -43,5 +43,5 @@ def run_with_core(
     try:
         return asyncio.run(main())
     except LoremdError as error:
-        error_console.print(f"{error.code} : {error}")
+        error_console.print(f"{error.code}: {error}")
         raise typer.Exit(code=1) from error

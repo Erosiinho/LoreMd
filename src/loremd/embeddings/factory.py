@@ -1,4 +1,4 @@
-"""Choix du fournisseur d'embeddings depuis la configuration."""
+"""Picks the embedding provider from the configuration."""
 
 from __future__ import annotations
 
@@ -21,4 +21,4 @@ def build_provider(config: EmbeddingsConfig) -> EmbeddingProvider:
             )
         case "hash":
             return HashEmbeddingProvider(config.dimensions)
-    raise ValueError(f"fournisseur d'embeddings inconnu : {config.provider}")
+    raise ValueError(f"unknown embedding provider: {config.provider}")

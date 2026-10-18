@@ -1,7 +1,7 @@
-"""Écriture et lecture des mémoires.
+"""Writing and reading memories.
 
-Une écriture suit toujours le même chemin : validation, détection de secrets,
-déduplication, verrou d'espace, fichier, commit, index, audit.
+A write always follows the same path: validation, secret detection,
+deduplication, space lock, file, commit, index, audit.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ TITLE_MAX_LENGTH = 120
 
 @dataclass
 class WriteResult:
-    """Résultat d'une écriture : créée, ou doublon renvoyé tel quel."""
+    """Result of a write: created, or an existing duplicate returned as is."""
 
     memory: Memory
     created: bool
@@ -45,11 +45,11 @@ class WriteResult:
 
 
 def derive_title(content: str) -> str:
-    """Titre déduit de la première phrase quand l'agent n'en fournit pas."""
+    """Title derived from the first sentence when the agent does not provide one."""
     first_line = next((line.strip() for line in content.splitlines() if line.strip()), "")
     first_line = first_line.lstrip("# ").strip()
     if not first_line:
-        raise ValidationError("content est vide")
+        raise ValidationError("content is empty")
     sentence = re.split(r"(?<=[.!?])\s", first_line)[0]
     title = sentence if len(sentence) <= TITLE_MAX_LENGTH else sentence[:TITLE_MAX_LENGTH].rstrip()
     return title
@@ -61,7 +61,7 @@ def author_email(agent_name: str, domain: str) -> str:
 
 
 class MemoryService:
-    """Opérations de mémoire exposées par MCP et par la CLI."""
+    """Memory operations exposed through MCP and the CLI."""
 
     def __init__(
         self,
@@ -84,35 +84,35 @@ class MemoryService:
     def _validate_content(self, content: str) -> str:
         body = content.strip()
         if not body:
-            raise ValidationError("content est vide")
+            raise ValidationError("content is empty")
         size = len(body.encode("utf-8"))
         if size > self._settings.write.max_bytes:
             raise ValidationError(
-                f"mémoire trop longue : {size} octets pour un maximum de "
+                f"memory too long: {size} bytes, maximum is "
                 f"{self._settings.write.max_bytes}"
             )
         if self._settings.write.detect_secrets:
             findings = secrets.scan(body)
             if findings:
                 raise SecretDetected(
-                    "secret probable détecté, écriture refusée : "
+                    "likely secret detected, write rejected: "
                     + ", ".join(str(finding) for finding in findings)
                 )
         return body
 
-    # -- lecture -------------------------------------------------------------
+    # -- reading -------------------------------------------------------------
 
     async def get(self, principal: Principal, memory_id: str) -> IndexedMemory:
         principal.require_scope(Scope.READ)
         spaces = await self._spaces.list(principal)
         if not spaces:
-            raise NotFound(f"mémoire introuvable : {memory_id}")
+            raise NotFound(f"memory not found: {memory_id}")
         async with self._db.acquire() as connection:
             memory = await MemoryIndexRepository(connection).get(
                 memory_id, [space.id for space in spaces]
             )
         if memory is None:
-            raise NotFound(f"mémoire introuvable : {memory_id}")
+            raise NotFound(f"memory not found: {memory_id}")
         await self._audit.record(
             principal, "memory_get", target=memory_id, space_id=memory.space_id
         )
@@ -131,13 +131,13 @@ class MemoryService:
         file_path = resolved.path / indexed.path
         if not file_path.exists():
             raise NotFound(
-                f"fichier absent pour {indexed.id} : {indexed.path} — lancer `loremd reindex`"
+                f"file missing for {indexed.id}: {indexed.path} — run `loremd reindex`"
             )
         return frontmatter.read_file(
             file_path, space=resolved.slug, relative_path=indexed.path
         )
 
-    # -- écriture ------------------------------------------------------------
+    # -- writing -------------------------------------------------------------
 
     async def write(
         self,
@@ -262,10 +262,10 @@ class MemoryService:
     async def update(
         self, principal: Principal, memory_id: str, content: str, reason: str
     ) -> WriteResult:
-        """Modifie une mémoire existante. Le motif devient le message de commit."""
+        """Changes an existing memory. The reason becomes the commit message."""
         principal.require_scope(Scope.WRITE)
         if not reason.strip():
-            raise ValidationError("reason est obligatoire : il devient le message du commit")
+            raise ValidationError("reason is required: it becomes the commit message")
         indexed = await self.get(principal, memory_id)
         resolved = await self._spaces.resolve(indexed.space, principal)
         body = self._validate_content(content)
@@ -299,10 +299,10 @@ class MemoryService:
     async def supersede(
         self, principal: Principal, memory_id: str, new_content: str, reason: str
     ) -> WriteResult:
-        """Remplace une mémoire obsolète : l'ancienne passe en `superseded`."""
+        """Replaces an outdated memory: the old one becomes `superseded`."""
         principal.require_scope(Scope.WRITE)
         if not reason.strip():
-            raise ValidationError("reason est obligatoire : il devient le message du commit")
+            raise ValidationError("reason is required: it becomes the commit message")
         indexed = await self.get(principal, memory_id)
         resolved = await self._spaces.resolve(indexed.space, principal)
         body = self._validate_content(new_content)
@@ -329,7 +329,7 @@ class MemoryService:
                     if resolved.space.review_required
                     else MemoryStatus.ACTIVE,
                     verified=False,
-                    source=f"supersede de {memory_id}",
+                    source=f"supersedes {memory_id}",
                     author=principal.name,
                     created=now,
                     updated=now,
@@ -370,10 +370,10 @@ class MemoryService:
     # -- remote --------------------------------------------------------------
 
     def _maybe_push(self, resolved: ResolvedSpace) -> None:
-        """Push best-effort vers le remote (la synchro robuste arrive en phase 2)."""
+        """Best-effort push to the remote (robust sync comes in phase 2)."""
         if not self._settings.git.auto_push or not resolved.repo.has_remote():
             return
         try:
             resolved.repo.push()
-        except Exception:  # noqa: BLE001 - le remote ne doit pas bloquer l'écriture
-            logger.warning("push vers le remote impossible pour %s", resolved.slug, exc_info=True)
+        except Exception:  # noqa: BLE001 - the remote must not block the write
+            logger.warning("could not push to the remote for %s", resolved.slug, exc_info=True)

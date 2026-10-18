@@ -1,1 +1,1 @@
-"""CLI d'administration `loremd`."""
+"""`loremd` administration CLI."""

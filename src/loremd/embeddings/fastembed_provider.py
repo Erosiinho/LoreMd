@@ -1,4 +1,4 @@
-"""Embeddings locaux via fastembed (ONNX, CPU)."""
+"""Local embeddings with fastembed (ONNX, CPU)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .base import EmbeddingProvider, normalize
 
 
 class FastEmbedProvider(EmbeddingProvider):
-    """Charge le modèle à la première utilisation, puis le réutilise."""
+    """Loads the model on first use, then reuses it."""
 
     def __init__(self, model: str, dimensions: int) -> None:
         self.model = model
@@ -25,10 +25,10 @@ class FastEmbedProvider(EmbeddingProvider):
             if self._engine is None:
                 try:
                     from fastembed import TextEmbedding
-                except ImportError as exc:  # pragma: no cover - dépendance optionnelle
+                except ImportError as exc:  # pragma: no cover - optional dependency
                     raise ConfigError(
-                        "fastembed n'est pas installé : `pip install 'loremd[embeddings]'` "
-                        "ou choisir un autre fournisseur d'embeddings"
+                        "fastembed is not installed: `pip install 'loremd[embeddings]'` "
+                        "or pick another embedding provider"
                     ) from exc
                 self._engine = await asyncio.to_thread(TextEmbedding, model_name=self.model)
         return self._engine
