@@ -40,3 +40,7 @@ class ConflictError(LoremdError):
 
 class GitError(LoremdError):
     code = "git_error"
+
+
+class RateLimited(LoremdError):
+    code = "rate_limited"

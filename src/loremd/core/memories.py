@@ -60,6 +60,28 @@ def author_email(agent_name: str, domain: str) -> str:
     return f"{local}@{domain}"
 
 
+def validate_content(content: str, *, max_bytes: int, detect_secrets: bool = True) -> str:
+    """Checks a memory body and returns it stripped.
+
+    Three rules, in order: not empty, not oversized, no secret. A secret stops
+    the write before anything touches the disk, so nothing is ever committed.
+    """
+    body = content.strip()
+    if not body:
+        raise ValidationError("content is empty")
+    size = len(body.encode("utf-8"))
+    if size > max_bytes:
+        raise ValidationError(f"memory too long: {size} bytes, maximum is {max_bytes}")
+    if detect_secrets:
+        findings = secrets.scan(body)
+        if findings:
+            raise SecretDetected(
+                "likely secret detected, write rejected: "
+                + ", ".join(str(finding) for finding in findings)
+            )
+    return body
+
+
 class MemoryService:
     """Memory operations exposed through MCP and the CLI."""
 
@@ -82,28 +104,20 @@ class MemoryService:
     # -- validation ----------------------------------------------------------
 
     def _validate_content(self, content: str) -> str:
-        body = content.strip()
-        if not body:
-            raise ValidationError("content is empty")
-        size = len(body.encode("utf-8"))
-        if size > self._settings.write.max_bytes:
-            raise ValidationError(
-                f"memory too long: {size} bytes, maximum is "
-                f"{self._settings.write.max_bytes}"
-            )
-        if self._settings.write.detect_secrets:
-            findings = secrets.scan(body)
-            if findings:
-                raise SecretDetected(
-                    "likely secret detected, write rejected: "
-                    + ", ".join(str(finding) for finding in findings)
-                )
-        return body
+        return validate_content(
+            content,
+            max_bytes=self._settings.write.max_bytes,
+            detect_secrets=self._settings.write.detect_secrets,
+        )
 
     # -- reading -------------------------------------------------------------
 
-    async def get(self, principal: Principal, memory_id: str) -> IndexedMemory:
-        principal.require_scope(Scope.READ)
+    async def _lookup(self, principal: Principal, memory_id: str) -> IndexedMemory:
+        """Finds a memory among the token's spaces, without auditing a read.
+
+        A memory outside the token's spaces is reported as missing rather than
+        forbidden: a token must not be able to probe what exists elsewhere.
+        """
         spaces = await self._spaces.list(principal)
         if not spaces:
             raise NotFound(f"memory not found: {memory_id}")
@@ -113,13 +127,19 @@ class MemoryService:
             )
         if memory is None:
             raise NotFound(f"memory not found: {memory_id}")
+        return memory
+
+    async def get(self, principal: Principal, memory_id: str) -> IndexedMemory:
+        principal.require_scope(Scope.READ)
+        memory = await self._lookup(principal, memory_id)
         await self._audit.record(
             principal, "memory_get", target=memory_id, space_id=memory.space_id
         )
         return memory
 
     async def history(self, principal: Principal, memory_id: str) -> list[Commit]:
-        indexed = await self.get(principal, memory_id)
+        principal.require_scope(Scope.READ)
+        indexed = await self._lookup(principal, memory_id)
         resolved = await self._spaces.resolve(indexed.space, principal)
         commits = resolved.repo.history(indexed.path)
         await self._audit.record(
@@ -266,7 +286,7 @@ class MemoryService:
         principal.require_scope(Scope.WRITE)
         if not reason.strip():
             raise ValidationError("reason is required: it becomes the commit message")
-        indexed = await self.get(principal, memory_id)
+        indexed = await self._lookup(principal, memory_id)
         resolved = await self._spaces.resolve(indexed.space, principal)
         body = self._validate_content(content)
 
@@ -303,7 +323,7 @@ class MemoryService:
         principal.require_scope(Scope.WRITE)
         if not reason.strip():
             raise ValidationError("reason is required: it becomes the commit message")
-        indexed = await self.get(principal, memory_id)
+        indexed = await self._lookup(principal, memory_id)
         resolved = await self._spaces.resolve(indexed.space, principal)
         body = self._validate_content(new_content)
 

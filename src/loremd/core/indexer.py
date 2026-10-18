@@ -128,11 +128,17 @@ class Indexer:
         if space.last_indexed_commit == head:
             return IndexReport(space=space.slug, commit=head)
 
+        base = space.last_indexed_commit
+        if base is not None and not repo.has_commit(base):
+            # The commit we indexed from is gone (rebase, force-push, repo
+            # recreated): there is no diff to trust, so rebuild from the files.
+            return await self.reindex_space(space, full=True)
+
         report = IndexReport(space=space.slug, commit=head)
         root = Path(space.path)
         to_index: list[Memory] = []
 
-        for status, relative in repo.changed_files(space.last_indexed_commit):
+        for status, relative in repo.changed_files(base):
             if not is_memory_path(relative):
                 continue
             if status == "D":
