@@ -67,6 +67,13 @@ class AuditConfig(BaseModel):
     enabled: bool = True
 
 
+class LimitsConfig(BaseModel):
+    """Per-token rate limit. 0 disables it."""
+
+    requests_per_minute: int = 120
+    burst: int = 40
+
+
 class Settings(BaseSettings):
     """Full instance configuration."""
 
@@ -84,6 +91,7 @@ class Settings(BaseSettings):
     write: WriteConfig = Field(default_factory=WriteConfig)
     git: GitConfig = Field(default_factory=GitConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
+    limits: LimitsConfig = Field(default_factory=LimitsConfig)
 
     # Phase 0: a single token from an environment variable, full access.
     bootstrap_token: str | None = None

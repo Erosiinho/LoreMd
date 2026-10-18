@@ -36,8 +36,10 @@ Seven tools should show up: `spaces_list`, `memory_search`, `memory_get`,
 
 | Message | Cause |
 |---|---|
-| `unauthorized: missing token` | The `Authorization` header does not reach the server. |
+| `401 unauthorized: missing token` | The `Authorization` header does not reach the server. Check the proxy, and that the client sends it on every request. |
 | `unauthorized: unknown token` | Token copied wrong, or revoked and recreated. |
+| `unauthorized: token expired` | The token reached its `--expires-days`: create a new one, then revoke the old one. |
 | `forbidden: space not allowed for this token` | The token does not include this space: `loremd token create … --space <slug>`. |
 | `forbidden: token lacks the write scope` | Read-only token. |
 | `secret_detected` | The content contains a key or a password: the write is rejected. |
+| `rate_limited` | The token went over `limits.requests_per_minute`. The message says how long to wait. |

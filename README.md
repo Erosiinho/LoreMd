@@ -122,12 +122,25 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,embeddings]"
 pytest
 ruff check src tests
+mypy
 ```
 
-The tests in this suite need neither Postgres nor the network: they cover the
-file format, identifiers, secret detection, tokens, permissions and git
-operations. Code paths that touch the database are tested against a Postgres
-instance with pgvector (`docker compose up postgres`).
+The default suite needs neither Postgres nor the network: it covers the file
+format, identifiers, secret detection, tokens, rate limiting, permissions and
+git operations.
+
+The tests under `tests/integration/` exercise the real SQL, the real git
+repositories and the MCP server over HTTP. They are skipped unless
+`LOREMD_TEST_DSN` points at a Postgres with pgvector:
+
+```bash
+docker run -d --rm -p 5432:5432 -e POSTGRES_PASSWORD=loremd \
+    --name loremd-test pgvector/pgvector:pg16
+LOREMD_TEST_DSN=postgresql://postgres:loremd@localhost:5432/postgres pytest
+```
+
+Those tests recreate the `public` schema on each run, so point them at a
+throwaway database.
 
 ## Security
 
@@ -135,12 +148,21 @@ instance with pgvector (`docker compose up postgres`).
   revocable, with expiry and an optional IP allowlist.
 - Scopes `read` / `write` / `admin`, combined with a list of spaces: a token
   sees nothing outside its own spaces.
+- A request with no bearer token gets a `401` before the MCP handshake; the
+  token itself is verified on every call, so revoking one takes effect at once.
+- Per-token rate limit (`limits` in `config.yaml`), so one looping agent cannot
+  saturate the instance.
 - Secret detection on write: the call is rejected and nothing is committed.
+- Commits are signed with the agent's name through `GIT_AUTHOR_*`, so the
+  author in `git log` is the agent even when the host has its own git identity.
 - Memory content is returned to agents as **data**, never as instructions (see
   `loremd/instructions.py`).
 
 ## Status
 
-Phases 0–1 of the plan: core, MCP, hybrid index, tokens, CLI, Docker Compose.
-Coming next: full two-way git sync (watcher, webhooks, conflicts), admin
-console, SSO and metrics.
+Phases 0–1 of the plan: core, MCP over Streamable HTTP, hybrid search with
+`no_match`, dedup, agents/tokens/scopes, audit, per-token rate limiting, CLI,
+Docker Compose and Caddy.
+
+Coming next (phase 2): full two-way git sync (watcher, webhooks, conflict
+handling), admin console, review queue. Then SSO, metrics and retention.

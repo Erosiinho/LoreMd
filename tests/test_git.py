@@ -38,7 +38,33 @@ def test_commit_carries_the_agent_name(repo: GitRepo) -> None:
     assert sha is not None
     commits = repo.history(path)
     assert commits[0].author == "claude-code"
+    assert commits[0].email == "claude@agents.local"
     assert commits[0].message == "decision: a"
+
+
+def test_commit_author_beats_an_ambient_git_identity(
+    repo: GitRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A VPS or a CI runner can export these; the agent must still sign.
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "Someone Else")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "someone@else.invalid")
+    path = write(repo, "decisions/a.md", "first version")
+
+    repo.commit(
+        [path], "decision: a", author_name="codex-ci", author_email="codex-ci@agents.local"
+    )
+
+    commit = repo.history(path)[0]
+    assert commit.author == "codex-ci"
+    assert commit.email == "codex-ci@agents.local"
+
+
+def test_blank_author_falls_back_to_loremd(repo: GitRepo) -> None:
+    path = write(repo, "notes/a.md", "note")
+
+    repo.commit([path], "note: a", author_name="  ", author_email="")
+
+    assert repo.history(path)[0].author == "loremd"
 
 
 def test_commit_without_changes_creates_nothing(repo: GitRepo) -> None:
@@ -77,6 +103,16 @@ def test_changed_files_without_base_lists_everything(repo: GitRepo) -> None:
     repo.commit([path], "fact: c", author_name="agent", author_email="a@b.c")
 
     assert repo.changed_files(None) == [("A", path)]
+
+
+def test_has_commit_distinguishes_known_from_vanished(repo: GitRepo) -> None:
+    path = write(repo, "facts/c.md", "fact")
+    sha = repo.commit([path], "fact: c", author_name="agent", author_email="a@b.c")
+
+    assert sha is not None
+    assert repo.has_commit(sha)
+    assert not repo.has_commit("0" * 40)
+    assert not repo.has_commit("")
 
 
 def test_failing_git_command_raises(repo: GitRepo) -> None:

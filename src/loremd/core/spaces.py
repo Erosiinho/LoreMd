@@ -164,9 +164,6 @@ class SpaceService:
             return spaces
         return [space for space in spaces if space.id in principal.space_ids]
 
-    async def accessible_ids(self, principal: Principal) -> list[Space]:
-        return await self.list(principal)
-
     async def set_last_indexed_commit(self, space: Space, commit: str | None) -> None:
         async with self._db.acquire() as connection:
             await SpaceRepository(connection).set_last_indexed_commit(space.id, commit)

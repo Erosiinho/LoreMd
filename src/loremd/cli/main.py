@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .. import __version__
-from ..auth.principal import Principal
+from ..auth.principal import Principal, Scope
 from ..auth.tokens import generate_token
 from ..core.models import MemoryType
 from ..core.service import Loremd
@@ -47,6 +47,24 @@ def main(
 def version() -> None:
     """Shows the version."""
     console.print(f"loremd {__version__}")
+
+
+def parse_scopes(raw: str) -> list[str]:
+    """Validates a `read,write` string.
+
+    A typo caught here rather than stored: an unknown scope in the database
+    would silently produce a token that can do nothing.
+    """
+    requested = [item.strip().lower() for item in raw.split(",") if item.strip()]
+    if not requested:
+        raise typer.BadParameter("at least one scope is required")
+    allowed = {scope.value for scope in Scope}
+    unknown = [scope for scope in requested if scope not in allowed]
+    if unknown:
+        raise typer.BadParameter(
+            f"unknown scope: {', '.join(unknown)} (allowed: {', '.join(sorted(allowed))})"
+        )
+    return list(dict.fromkeys(requested))
 
 
 # --------------------------------------------------------------------------- spaces
@@ -164,7 +182,7 @@ def agent_create(
     ] = None,
 ) -> None:
     """Creates an agent and, if spaces are given, its first token."""
-    scopes = [item.strip() for item in scope.split(",") if item.strip()]
+    scopes = parse_scopes(scope)
 
     async def operation(core: Loremd):
         async with core.db.acquire() as connection:
@@ -254,9 +272,7 @@ def token_create(
     expires_days: Annotated[int | None, typer.Option("--expires-days")] = None,
 ) -> None:
     """Creates a token for an existing agent."""
-    scopes = [item.strip() for item in scope.split(",") if item.strip()]
-    if not scopes:
-        raise typer.BadParameter("at least one scope is required")
+    scopes = parse_scopes(scope)
 
     async def operation(core: Loremd):
         async with core.db.acquire() as connection:
@@ -463,11 +479,27 @@ def serve(
 
 @app.command()
 def doctor() -> None:
-    """Checks the setup: database, pgvector, dimensions, spaces, git."""
+    """Checks the setup: git, database, pgvector, dimensions, spaces, tokens."""
+    import os
+    import shutil
+
     from ..core.git import GitRepo
 
     async def operation(core: Loremd):
         checks: list[tuple[str, bool, str]] = []
+
+        git_binary = shutil.which("git")
+        checks.append(("git binary", git_binary is not None, git_binary or "git is required"))
+
+        root = core.settings.spaces.root
+        checks.append(
+            (
+                "spaces root writable",
+                root.is_dir() and os.access(root, os.W_OK),
+                str(root),
+            )
+        )
+
         async with core.db.acquire() as connection:
             await connection.execute("SELECT 1")
             checks.append(("Postgres connection", True, core.settings.database.dsn.split("@")[-1]))
@@ -489,6 +521,33 @@ def doctor() -> None:
             checks.append((f"git repository \"{space.slug}\"", repo.exists, space.path))
         if not spaces:
             checks.append(("spaces", False, "no space: `loremd space create <slug>`"))
+
+        async with core.db.acquire() as connection:
+            usable = await connection.fetchval(
+                """
+                SELECT count(*) FROM tokens t JOIN agents a ON a.id = t.agent_id
+                WHERE t.revoked_at IS NULL AND a.disabled_at IS NULL
+                  AND (t.expires_at IS NULL OR t.expires_at > now())
+                """
+            )
+        checks.append(
+            (
+                "usable agent token",
+                bool(usable) or bool(core.settings.bootstrap_token),
+                f"{usable} active token(s)"
+                if usable
+                else "no token: `loremd agent create <name> --space <slug>`",
+            )
+        )
+        if core.settings.bootstrap_token:
+            checks.append(
+                (
+                    "bootstrap token unset",
+                    False,
+                    "LOREMD_BOOTSTRAP_TOKEN grants full access to every space — "
+                    "unset it once real tokens exist",
+                )
+            )
         return checks
 
     failures = 0

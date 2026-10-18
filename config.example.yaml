@@ -50,3 +50,9 @@ git:
 
 audit:
   enabled: true
+
+limits:
+  # Per-token rate limit, applied once the token is validated. 0 disables it.
+  # The burst covers the batch of calls an agent makes when a session starts.
+  requests_per_minute: 120
+  burst: 40
