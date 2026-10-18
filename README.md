@@ -23,7 +23,15 @@ docker compose exec app loremd space create product \
     --remote git@gitlab.acme.com:memory/product.git
 docker compose exec app loremd agent create codex-ci --space product --scope read,write
 # → prints the token once
+docker compose exec app loremd admin create alice@acme.com
+# → prompts for a password, prints the TOTP secret once
 ```
+
+The admin console is then at `https://memory.acme.com/admin`.
+
+For a space with a remote, the container needs an SSH deploy key with write
+access, plus the remote's host key: put `id_ed25519` and a `known_hosts`
+(`ssh-keyscan gitlab.acme.com > deploy/ssh/known_hosts`) in `deploy/ssh/`.
 
 Check the installation:
 
@@ -37,19 +45,20 @@ Then connect an agent: see [docs/clients/](docs/clients/README.md).
 ## Architecture
 
 ```
-Agents ──HTTPS + Bearer──► Caddy ──► MCP API (/mcp) ──► Core ──► Spaces (git)
-                                                           └──► Postgres (index)
-Humans ──git clone──► per-space git remote ──► Obsidian
+Agents ──HTTPS + Bearer──► Caddy ──► MCP API (/mcp) ──────► Core ──► Spaces (git) ◄──sync──► remote
+Admins ──password + TOTP──►       ──► Console (/admin) ──►    │                              ▲
+Forge  ──signed webhook───►       ──► /hooks/git/<space> ──►  └──► Postgres (index)          │
+                                                                    Humans: Obsidian ──git push┘
 ```
 
 | Package | Role |
 |---|---|
-| `loremd.core` | Files, commits, search, dedup, ACL, audit. Knows nothing about MCP or HTTP. |
+| `loremd.core` | Files, commits, search, dedup, ACL, audit, sync with the remote, review. Knows nothing about MCP or HTTP. |
 | `loremd.db` | Postgres index (pgvector + tsvector), migrations, queries. |
 | `loremd.embeddings` | Local fastembed by default, OpenAI-compatible API as an option. |
-| `loremd.auth` | Agent tokens, scopes, per-space isolation. |
-| `loremd.api` | MCP server (Streamable HTTP) and ASGI application. |
-| `loremd.cli` | Administration: spaces, agents, tokens, reindexing, audit. |
+| `loremd.auth` | Agent tokens, scopes, per-space isolation; console admins (scrypt passwords, TOTP, sessions). |
+| `loremd.api` | MCP server (Streamable HTTP), admin console, push webhook, ASGI application. |
+| `loremd.cli` | Administration: spaces, agents, tokens, review, conflicts, admins, reindexing, audit. |
 
 ## Memory format
 
@@ -87,6 +96,30 @@ We use Postgres with Drizzle as the ORM for the shop API.
 Statuses: `active`, `pending`, `superseded`, `rejected`, `conflict`. Only
 `active` memories show up in search.
 
+## Human sync and governance
+
+- **Sync.** Each commit is pushed to the space's remote in the background
+  (commits close together are batched). Every `sync.interval_seconds`, and at
+  once when the forge calls the webhook, LoreMd fetches, rebases its commits on
+  the remote and reindexes only the files in the diff.
+- **Conflicts.** When the rebase fails, nothing is lost: the remote version
+  keeps the path, the server version is kept alongside it
+  (`…-conflict-xxxxxx.md`), both get `status: conflict`, leave search, and
+  cannot be changed by agents until someone resolves them in the console or
+  with `loremd conflict resolve`.
+- **Review.** Turn it on per space (`loremd space review <slug> --on`, stored in
+  `.loremd/space.yaml`) or per agent (`loremd agent review <name> --on`). Writes
+  then land as `pending`; an approval publishes them with `verified: true`, a
+  rejection keeps the file as `rejected`. A replacement under review leaves the
+  old memory active until it is approved.
+- **Console.** `/admin`: review queue, memory history, `verified` toggle,
+  side-by-side conflict resolution (keep one version, merge by hand, or
+  discard), per-space sync status, audit log. Local accounts with password and
+  TOTP; the `reviewer` role sees everything but the audit log. Every decision
+  is a commit signed with the admin's email.
+
+Setting up the webhook and working in Obsidian: [docs/obsidian.md](docs/obsidian.md).
+
 ## MCP tools
 
 | Tool | Role |
@@ -104,10 +137,19 @@ Statuses: `active`, `pending`, `superseded`, `rejected`, `conflict`. Only
 ```bash
 loremd space create <slug> [--remote URL] [--review]
 loremd space list
-loremd space sync [<slug>] [--pull/--no-pull] [--push]
-loremd agent create <name> --space <slug> --scope read,write
+loremd space sync [<slug>] [--pull/--no-pull] [--push/--no-push]
+loremd space remote <slug> <url>
+loremd space review <slug> --on|--off
+loremd agent create <name> --space <slug> --scope read,write [--review]
+loremd agent review <name> --on|--off
 loremd token create <agent> --space <slug> [--expires-days 90]
 loremd token revoke <prefix>
+loremd review list [--space <slug>]
+loremd review approve|reject|verify <id>
+loremd conflict list [--space <slug>]
+loremd conflict resolve <id> --keep memory|copy|discard
+loremd admin create <email> [--role admin|reviewer]
+loremd admin list | disable <email> | password <email> | reset-totp <email>
 loremd reindex [<slug>]
 loremd search "<query>" [--space <slug>]
 loremd audit --limit 50
@@ -126,11 +168,12 @@ mypy
 ```
 
 The default suite needs neither Postgres nor the network: it covers the file
-format, identifiers, secret detection, tokens, rate limiting, permissions and
-git operations.
+format, identifiers, secret detection, tokens, rate limiting, permissions,
+passwords, TOTP, webhook signatures, conflict merging and git operations.
 
 The tests under `tests/integration/` exercise the real SQL, the real git
-repositories and the MCP server over HTTP. They are skipped unless
+repositories (sync against a bare remote included), the MCP server over HTTP
+and the console. They are skipped unless
 `LOREMD_TEST_DSN` points at a Postgres with pgvector:
 
 ```bash
@@ -157,12 +200,20 @@ throwaway database.
   author in `git log` is the agent even when the host has its own git identity.
 - Memory content is returned to agents as **data**, never as instructions (see
   `loremd/instructions.py`).
+- Console: scrypt password hashes, TOTP with replay protection, server-side
+  sessions in a `SameSite=Strict`, `HttpOnly` cookie, CSRF token on every form,
+  a strict Content-Security-Policy, agent content always rendered escaped, and
+  login attempts limited per client IP and per email.
+- Webhook: authenticated with a shared secret (GitHub/Gitea HMAC signature or
+  GitLab token); it only schedules a sync, and is off until a secret is set.
 
 ## Status
 
-Phases 0–1 of the plan: core, MCP over Streamable HTTP, hybrid search with
+Phases 0–2 of the plan: core, MCP over Streamable HTTP, hybrid search with
 `no_match`, dedup, agents/tokens/scopes, audit, per-token rate limiting, CLI,
-Docker Compose and Caddy.
+Docker Compose and Caddy; two-way git sync (background push, periodic and
+webhook pull, incremental reindexing, conflict handling), review queue per
+space or per agent, `verified` flag, and the admin console with TOTP.
 
-Coming next (phase 2): full two-way git sync (watcher, webhooks, conflict
-handling), admin console, review queue. Then SSO, metrics and retention.
+Coming next (phase 3): OIDC SSO for the console, anti-secret pre-receive hook,
+metrics, retention, Helm chart.

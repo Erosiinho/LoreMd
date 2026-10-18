@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}Spaces{% endblock %}
+{% block content %}
+<h1>Spaces</h1>
+{% if not spaces %}
+<p>No space yet: <code>loremd space create &lt;slug&gt;</code>.</p>
+{% else %}
+<table>
+  <thead>
+    <tr><th>space</th><th>active</th><th>pending</th><th>conflict</th><th>review</th><th>remote</th><th>last sync</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for space in spaces %}
+    {% set count = counts.get(space.slug, {}) %}
+    <tr>
+      <td><strong>{{ space.slug }}</strong>{% if space.description %}<br><small>{{ space.description }}</small>{% endif %}</td>
+      <td>{{ count.get("active", 0) }}</td>
+      <td>{% if count.get("pending", 0) %}<a href="{{ prefix }}/review?space={{ space.slug | urlencode }}">{{ count.get("pending") }}</a>{% else %}0{% endif %}</td>
+      <td>{% if count.get("conflict", 0) %}<a class="warn" href="{{ prefix }}/conflicts">{{ count.get("conflict") }}</a>{% else %}0{% endif %}</td>
+      <td>{{ "required" if space.review_required else "—" }}</td>
+      <td><small>{{ space.remote_url or "—" }}</small></td>
+      <td>
+        {% if space.last_sync_error %}<span class="error" title="{{ space.last_sync_error }}">failed</span>
+        {% elif space.last_synced_at %}{{ space.last_synced_at.isoformat(timespec="minutes") }}
+        {% else %}—{% endif %}
+      </td>
+      <td>
+        <form method="post" action="{{ prefix }}/spaces/{{ space.slug | urlencode }}/sync">
+          {{ csrf(session) }}<button type="submit" class="small">Sync now</button>
+        </form>
+      </td>
+    </tr>
+    {% if space.last_sync_error %}
+    <tr class="detail"><td colspan="8"><pre class="error">{{ space.last_sync_error }}</pre></td></tr>
+    {% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

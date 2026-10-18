@@ -25,11 +25,13 @@ services:
       LOREMD_DATABASE__DSN: >-
         postgresql://${POSTGRES_USER:-loremd}:${POSTGRES_PASSWORD:-loremd}@postgres:5432/${POSTGRES_DB:-loremd}
       LOREMD_BOOTSTRAP_TOKEN: ${LOREMD_BOOTSTRAP_TOKEN:-}
+      LOREMD_SYNC__WEBHOOK_SECRET: ${LOREMD_SYNC__WEBHOOK_SECRET:-}
     volumes:
       - ./config.yaml:/etc/loremd/config.yaml:ro
       # The spaces: this is the memory itself, back it up first.
       - spaces:/data/spaces
-      # SSH deploy key for git remotes (optional).
+      # SSH deploy key for git remotes (optional): the private key and a
+      # known_hosts file with the remote's host key (`ssh-keyscan gitlab.acme.com`).
       - ${SSH_KEY_DIR:-./deploy/ssh}:/home/loremd/.ssh:ro
     expose:
       - "8000"

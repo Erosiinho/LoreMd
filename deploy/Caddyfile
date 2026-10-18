@@ -13,8 +13,19 @@
 		reverse_proxy app:8000
 	}
 
-	# The admin console arrives in phase 2; until then, everything else is
-	# rejected to reduce the exposed surface.
+	# Admin console (password + TOTP sessions) and the git push webhook
+	# (shared secret). Both authenticate in the application.
+	@console path /admin /admin/*
+	handle @console {
+		reverse_proxy app:8000
+	}
+
+	@hooks path /hooks/*
+	handle @hooks {
+		reverse_proxy app:8000
+	}
+
+	# Everything else is rejected to reduce the exposed surface.
 	handle {
 		respond "LoreMd" 404
 	}

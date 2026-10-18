@@ -45,8 +45,28 @@ write:
 git:
   # Domain used to build the author email of agent commits.
   author_email_domain: agents.loremd.local
-  # Automatic push to the remote after each commit (phase 2).
-  auto_push: false
+  # Push to the remote in the background after each commit.
+  auto_push: true
+  # Network operations (fetch, push, clone) give up after this long.
+  timeout_seconds: 60
+
+sync:
+  # Periodic pull and reindex of every space: picks up what humans push.
+  # 0 disables the watcher (the webhook and `loremd space sync` still work).
+  interval_seconds: 60
+  # Commits made within this window are pushed together.
+  push_debounce_seconds: 2
+  # Shared secret of the push webhook POST /hooks/git/<space>, see docs/obsidian.md.
+  # Unset disables the webhook. Prefer LOREMD_SYNC__WEBHOOK_SECRET in .env.
+  webhook_secret: null
+
+console:
+  # Admin console under /admin (review, conflicts, audit). Accounts are
+  # created with `loremd admin create`.
+  enabled: true
+  session_hours: 12
+  # Login attempts per minute, per client IP and per email.
+  login_attempts_per_minute: 10
 
 audit:
   enabled: true
