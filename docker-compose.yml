@@ -27,9 +27,9 @@ services:
       LOREMD_BOOTSTRAP_TOKEN: ${LOREMD_BOOTSTRAP_TOKEN:-}
     volumes:
       - ./config.yaml:/etc/loremd/config.yaml:ro
-      # Les espaces : c'est la mémoire elle-même, à sauvegarder en priorité.
+      # The spaces: this is the memory itself, back it up first.
       - spaces:/data/spaces
-      # Clé SSH de déploiement pour les remotes git (facultatif).
+      # SSH deploy key for git remotes (optional).
       - ${SSH_KEY_DIR:-./deploy/ssh}:/home/loremd/.ssh:ro
     expose:
       - "8000"

@@ -1,7 +1,7 @@
-"""Pool asyncpg et application des migrations.
+"""asyncpg pool and migration runner.
 
-Postgres n'est qu'un index : il peut être vidé et reconstruit par
-`loremd reindex`, à l'exception des tables agents, tokens et audit_log.
+Postgres is only an index: it can be wiped and rebuilt with `loremd reindex`,
+except for the agents, tokens and audit_log tables.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ EMBEDDING_DIM_PLACEHOLDER = "__EMBEDDING_DIM__"
 
 
 def _migration_files() -> list[tuple[str, str]]:
-    """Migrations (nom, sql) triées par nom."""
+    """Migrations as (name, sql), sorted by name."""
     root = resources.files(MIGRATIONS_PACKAGE)
     files = [item for item in root.iterdir() if item.name.endswith(".sql")]
     ordered = sorted(files, key=lambda item: item.name)
@@ -28,7 +28,7 @@ def _migration_files() -> list[tuple[str, str]]:
 
 
 class Database:
-    """Accès Postgres partagé par le serveur et la CLI."""
+    """Postgres access shared by the server and the CLI."""
 
     def __init__(self, dsn: str, *, min_size: int = 1, max_size: int = 10) -> None:
         self.dsn = dsn
@@ -39,7 +39,7 @@ class Database:
     @property
     def pool(self) -> asyncpg.Pool:
         if self._pool is None:
-            raise ConfigError("la base n'est pas connectée : appeler connect() d'abord")
+            raise ConfigError("database not connected: call connect() first")
         return self._pool
 
     async def connect(self) -> None:
@@ -64,7 +64,7 @@ class Database:
             yield connection
 
     async def migrate(self, embedding_dimensions: int) -> Sequence[str]:
-        """Applique les migrations manquantes. Retourne celles qui ont tourné."""
+        """Applies pending migrations. Returns the ones that ran."""
         applied: list[str] = []
         async with self.acquire() as connection:
             await connection.execute(
@@ -91,7 +91,7 @@ class Database:
         return applied
 
     async def embedding_dimensions(self) -> int | None:
-        """Dimension du vecteur telle que déclarée dans le schéma."""
+        """Vector dimension as declared in the schema."""
         async with self.acquire() as connection:
             row = await connection.fetchrow(
                 """
@@ -103,6 +103,6 @@ class Database:
         return int(row["dim"]) if row and row["dim"] and row["dim"] > 0 else None
 
 
-def dsn_from_path(path: Path) -> str:  # pragma: no cover - utilitaire de confort
-    """Lit un DSN depuis un fichier (secret monté dans le conteneur)."""
+def dsn_from_path(path: Path) -> str:  # pragma: no cover - convenience helper
+    """Reads a DSN from a file (a secret mounted in the container)."""
     return path.read_text(encoding="utf-8").strip()

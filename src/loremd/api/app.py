@@ -1,4 +1,4 @@
-"""Application ASGI : santé, information, et le serveur MCP sous /mcp."""
+"""ASGI application: health, info, and the MCP server under /mcp."""
 
 from __future__ import annotations
 
@@ -23,15 +23,15 @@ def create_app(settings: Settings | None = None, *, core: Loremd | None = None) 
     settings = settings or get_settings()
     service = core or Loremd(settings)
     mcp = build_mcp(service)
-    # Le sous-chemin est porté par le mount : sans cela, la route deviendrait /mcp/mcp.
+    # The sub-path comes from the mount: otherwise the route would become /mcp/mcp.
     mcp.settings.streamable_http_path = "/"
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await service.start()
-        logger.info("LoreMd %s prêt — MCP sur %s", __version__, MCP_MOUNT_PATH)
-        # Le gestionnaire de sessions MCP a son propre cycle de vie : le monter
-        # ne suffit pas, il faut le faire tourner.
+        logger.info("LoreMd %s ready — MCP at %s", __version__, MCP_MOUNT_PATH)
+        # The MCP session manager has its own lifecycle: mounting it is not
+        # enough, it has to be running.
         async with mcp.session_manager.run():
             try:
                 yield
@@ -41,7 +41,7 @@ def create_app(settings: Settings | None = None, *, core: Loremd | None = None) 
     app = FastAPI(
         title="LoreMd",
         version=__version__,
-        description="Mémoire partagée pour agents IA, en Markdown, auto-hébergée.",
+        description="Shared memory for AI agents, in Markdown, self-hosted.",
         lifespan=lifespan,
     )
     app.state.core = service
@@ -70,7 +70,7 @@ def create_app(settings: Settings | None = None, *, core: Loremd | None = None) 
     return app
 
 
-def run() -> None:  # pragma: no cover - point d'entrée uvicorn
+def run() -> None:  # pragma: no cover - uvicorn entry point
     import uvicorn
 
     settings = get_settings()

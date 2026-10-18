@@ -1,7 +1,7 @@
-"""Fixtures partagées.
+"""Shared fixtures.
 
-Les tests de cette suite ne touchent ni Postgres ni le réseau : ils portent sur
-les briques qui décident du contenu des fichiers et des droits.
+The tests in this suite touch neither Postgres nor the network: they cover the
+building blocks that decide file contents and permissions.
 """
 
 from __future__ import annotations
@@ -20,15 +20,15 @@ def memory() -> Memory:
         frontmatter=Frontmatter(
             id="01JA8KZ3M9X2QH7R4T6VABCDEF",
             type=MemoryType.DECISION,
-            title="Stack API — Postgres + Drizzle",
+            title="API stack — Postgres + Drizzle",
             project="shop",
             tags=["backend", "db"],
-            source="session claude-code",
+            source="claude-code session",
             author="claude-code-macbook",
             created=now,
             updated=now,
         ),
-        content="On utilise Postgres avec Drizzle comme ORM pour l'API du shop.",
-        space="produit",
-        path="decisions/stack-api-postgres-drizzle-abcdef.md",
+        content="We use Postgres with Drizzle as the ORM for the shop API.",
+        space="product",
+        path="decisions/api-stack-postgres-drizzle-abcdef.md",
     )

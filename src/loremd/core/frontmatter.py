@@ -1,8 +1,8 @@
-"""Lecture et écriture des fichiers `.md` à frontmatter YAML.
+"""Reading and writing `.md` files with YAML frontmatter.
 
-Le rendu est déterministe : même ordre de clés, dates ISO 8601, corps terminé
-par un retour à la ligne. Deux écritures identiques produisent donc le même
-fichier, et git ne voit pas de bruit.
+Rendering is deterministic: same key order, ISO 8601 dates, body ending with a
+newline. Two identical writes therefore produce the same file, and git sees no
+noise.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from .models import Frontmatter, Memory
 
 DELIMITER = "---"
 
-#: Ordre d'écriture des clés du frontmatter.
+#: Order in which frontmatter keys are written.
 KEY_ORDER = (
     "id",
     "type",
@@ -37,10 +37,10 @@ KEY_ORDER = (
 
 
 def split_document(text: str) -> tuple[dict[str, Any], str]:
-    """Sépare le frontmatter du corps. Lève si l'en-tête est absent ou invalide."""
+    """Splits the frontmatter from the body. Raises if the header is missing or invalid."""
     stripped = text.lstrip("﻿")
     if not stripped.startswith(DELIMITER):
-        raise ValidationError("frontmatter manquant : le fichier doit commencer par ---")
+        raise ValidationError("missing frontmatter: the file must start with ---")
 
     lines = stripped.splitlines()
     for index in range(1, len(lines)):
@@ -49,24 +49,24 @@ def split_document(text: str) -> tuple[dict[str, Any], str]:
             body = "\n".join(lines[index + 1 :])
             break
     else:
-        raise ValidationError("frontmatter non terminé : délimiteur --- de fin absent")
+        raise ValidationError("unterminated frontmatter: closing --- delimiter missing")
 
     try:
         data = yaml.safe_load(header) or {}
     except yaml.YAMLError as exc:
-        raise ValidationError(f"frontmatter YAML invalide : {exc}") from exc
+        raise ValidationError(f"invalid YAML frontmatter: {exc}") from exc
     if not isinstance(data, dict):
-        raise ValidationError("le frontmatter doit être un mapping YAML")
+        raise ValidationError("the frontmatter must be a YAML mapping")
     return data, body.strip()
 
 
 def parse(text: str, *, space: str, path: str) -> Memory:
-    """Construit une mémoire validée à partir du contenu d'un fichier."""
+    """Builds a validated memory from a file's content."""
     data, body = split_document(text)
     try:
         frontmatter = Frontmatter(**data)
     except PydanticValidationError as exc:
-        raise ValidationError(f"frontmatter invalide dans {path} : {exc}") from exc
+        raise ValidationError(f"invalid frontmatter in {path}: {exc}") from exc
     return Memory(frontmatter=frontmatter, content=body, space=space, path=path)
 
 
@@ -85,13 +85,13 @@ def _serialize(value: Any) -> Any:
 
 
 def render(memory: Memory) -> str:
-    """Rend la mémoire au format fichier."""
+    """Renders the memory in file format."""
     dumped = memory.frontmatter.model_dump()
     ordered: dict[str, Any] = {}
     for key in KEY_ORDER:
         if key in dumped:
             ordered[key] = _serialize(dumped.pop(key))
-    for key in sorted(dumped):  # champs additionnels conservés tels quels
+    for key in sorted(dumped):  # extra fields kept as is
         ordered[key] = _serialize(dumped[key])
 
     header = yaml.safe_dump(

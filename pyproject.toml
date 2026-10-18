@@ -1,7 +1,7 @@
 [project]
 name = "loremd"
 version = "0.1.0"
-description = "Mémoire partagée pour agents IA, en Markdown, auto-hébergée."
+description = "Shared memory for AI agents, in Markdown, self-hosted."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "AGPL-3.0-or-later" }

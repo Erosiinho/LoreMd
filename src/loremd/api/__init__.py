@@ -1,1 +1,1 @@
-"""Couche d'exposition : MCP en Streamable HTTP, et l'application ASGI."""
+"""Exposure layer: MCP over Streamable HTTP, and the ASGI application."""

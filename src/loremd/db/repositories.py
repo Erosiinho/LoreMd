@@ -1,7 +1,7 @@
-"""Accès aux tables de l'index.
+"""Access to the index tables.
 
-Toutes les requêtes filtrent explicitement sur les espaces autorisés : le
-cloisonnement n'est jamais laissé à l'appelant.
+Every query filters explicitly on the allowed spaces: isolation is never left
+to the caller.
 """
 
 from __future__ import annotations
@@ -234,7 +234,7 @@ class MemoryIndexRepository:
         statuses: Sequence[MemoryStatus] = (MemoryStatus.ACTIVE, MemoryStatus.PENDING),
         limit: int = 1,
     ) -> list[tuple[IndexedMemory, float]]:
-        """Voisins les plus proches dans un espace, avec leur similarité cosinus."""
+        """Nearest neighbours within a space, with their cosine similarity."""
         rows = await self.c.fetch(
             f"""
             SELECT {_MEMORY_COLUMNS}, 1 - (m.embedding <=> $1::vector) AS similarity
@@ -265,7 +265,7 @@ class MemoryIndexRepository:
         rrf_k: int = 60,
         candidate_pool: int = 50,
     ) -> list[SearchHit]:
-        """Recherche hybride : plein texte et vectoriel fusionnés par RRF."""
+        """Hybrid search: full-text and vector results merged with RRF."""
         rows = await self.c.fetch(
             f"""
             WITH filtered AS (

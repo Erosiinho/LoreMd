@@ -1,4 +1,4 @@
-"""Authentification par tokens d'agent."""
+"""Authentication with agent tokens."""
 
 from .principal import Principal, Scope
 from .tokens import TokenParts, generate_token, hash_token, parse_token

@@ -1,9 +1,9 @@
-"""Verrou d'écriture par espace.
+"""Per-space write lock.
 
-Une seule écriture à la fois par dépôt : git ne supporte pas deux commits
-concurrents dans le même arbre de travail. Le verrou combine un `asyncio.Lock`
-(concurrence interne au processus) et un `flock` sur un fichier de l'espace
-(concurrence entre le serveur, la CLI et le watcher).
+One write at a time per repository: git does not support two concurrent
+commits in the same working tree. The lock combines an `asyncio.Lock`
+(concurrency within the process) and a `flock` on a file in the space
+(concurrency between the server, the CLI and the watcher).
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def _release_file_lock(fd: int) -> None:
 
 @asynccontextmanager
 async def space_lock(slug: str, space_path: Path) -> AsyncIterator[None]:
-    """Prend le verrou d'écriture de l'espace pour la durée du bloc."""
+    """Holds the space's write lock for the duration of the block."""
     lock_path = Path(space_path) / LOCK_DIRNAME / LOCK_FILENAME
     async with _in_process_lock(slug):
         fd = await asyncio.to_thread(_acquire_file_lock, lock_path)

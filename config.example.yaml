@@ -1,51 +1,51 @@
-# LoreMd — configuration de l'instance.
-# Copier en config.yaml puis adapter. Toute valeur peut être surchargée par une
-# variable d'environnement LOREMD_<SECTION>__<CLE> (ex: LOREMD_DATABASE__DSN).
+# LoreMd — instance configuration.
+# Copy to config.yaml, then adapt. Any value can be overridden with an
+# environment variable LOREMD_<SECTION>__<KEY> (e.g. LOREMD_DATABASE__DSN).
 
 server:
   host: 0.0.0.0
   port: 8000
-  # URL publique annoncée aux agents (sert dans la doc de connexion).
-  public_url: https://memoire.acme.com
+  # Public URL advertised to agents (used in the connection docs).
+  public_url: https://memory.acme.com
 
 database:
   dsn: postgresql://loremd:loremd@postgres:5432/loremd
 
 spaces:
-  # Racine des dépôts git. Un sous-dossier = un espace.
+  # Root of the git repositories. One subdirectory = one space.
   root: /data/spaces
   default_branch: main
 
 embeddings:
-  # fastembed (local, aucune clé) ou openai (API compatible OpenAI).
+  # fastembed (local, no key) or openai (OpenAI-compatible API).
   provider: fastembed
   model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
   dimensions: 384
-  # Utilisés uniquement si provider = openai.
+  # Only used when provider = openai.
   api_base: https://api.openai.com/v1
   api_key: null
 
 search:
   default_limit: 8
   max_limit: 50
-  # Constante de la fusion RRF (Reciprocal Rank Fusion).
+  # RRF (Reciprocal Rank Fusion) constant.
   rrf_k: 60
-  # Similarité cosinus minimale pour qu'un résultat sémantique soit gardé. Un
-  # résultat trouvé par mots-clés est toujours gardé. Sans aucun résultat retenu,
-  # la recherche répond no_match. À recalibrer si l'on change de modèle.
+  # Minimum cosine similarity for a semantic hit to be kept. A keyword hit is
+  # always kept. When no hit is kept, search answers no_match. Recalibrate when
+  # changing models.
   min_similarity: 0.4
 
 write:
   max_bytes: 32768
-  # Au-dessus de cette similarité cosinus, on renvoie la mémoire existante
-  # au lieu d'en créer une nouvelle.
+  # Above this cosine similarity, the existing memory is returned instead of
+  # creating a new one.
   dedup_threshold: 0.93
   detect_secrets: true
 
 git:
-  # Domaine utilisé pour fabriquer l'email d'auteur des commits d'agents.
+  # Domain used to build the author email of agent commits.
   author_email_domain: agents.loremd.local
-  # Push automatique vers le remote après chaque commit (phase 2).
+  # Automatic push to the remote after each commit (phase 2).
   auto_push: false
 
 audit:

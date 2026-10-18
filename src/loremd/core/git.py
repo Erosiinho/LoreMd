@@ -1,7 +1,7 @@
-"""Enveloppe autour du binaire git.
+"""Wrapper around the git binary.
 
-Le CLI est préféré à une liaison native : il gère déjà le rebase, les hooks et
-l'authentification du remote exactement comme le feront les humains.
+The CLI is preferred over native bindings: it already handles rebase, hooks and
+remote authentication exactly the way humans will.
 """
 
 from __future__ import annotations
@@ -27,13 +27,13 @@ _LOG_FORMAT = "%H%x1f%an%x1f%ae%x1f%aI%x1f%s"
 
 
 class GitRepo:
-    """Un dépôt git local, c'est-à-dire un espace."""
+    """A local git repository, i.e. a space."""
 
     def __init__(self, path: Path, *, default_branch: str = "main") -> None:
         self.path = Path(path)
         self.default_branch = default_branch
 
-    # -- plomberie -----------------------------------------------------------
+    # -- plumbing ------------------------------------------------------------
 
     def run(self, *args: str, check: bool = True) -> str:
         result = subprocess.run(
@@ -45,19 +45,19 @@ class GitRepo:
         )
         if check and result.returncode != 0:
             raise GitError(
-                f"git {' '.join(args)} a échoué ({result.returncode}) : "
+                f"git {' '.join(args)} failed ({result.returncode}): "
                 f"{result.stderr.strip() or result.stdout.strip()}"
             )
         return result.stdout.strip()
 
-    # -- cycle de vie --------------------------------------------------------
+    # -- lifecycle -----------------------------------------------------------
 
     @property
     def exists(self) -> bool:
         return (self.path / ".git").exists()
 
     def init(self) -> None:
-        """Crée le dépôt s'il n'existe pas déjà. Idempotent."""
+        """Creates the repository if it does not exist yet. Idempotent."""
         if self.exists:
             return
         self.path.mkdir(parents=True, exist_ok=True)
@@ -67,8 +67,8 @@ class GitRepo:
             text=True,
             check=True,
         )
-        # Les commits portent le nom de l'agent ; ces valeurs ne servent que de
-        # filet quand un outil git externe écrit dans le dépôt.
+        # Commits carry the agent's name; these values are only a fallback for
+        # when an external git tool writes to the repository.
         self.run("config", "user.name", "LoreMd")
         self.run("config", "user.email", "loremd@localhost")
 
@@ -79,7 +79,7 @@ class GitRepo:
         else:
             self.run("remote", "add", name, url)
 
-    # -- écriture ------------------------------------------------------------
+    # -- writing -------------------------------------------------------------
 
     def commit(
         self,
@@ -89,7 +89,7 @@ class GitRepo:
         author_name: str,
         author_email: str,
     ) -> str | None:
-        """Ajoute les chemins et commite. Retourne le sha, ou None si rien à commiter."""
+        """Stages the paths and commits. Returns the sha, or None if there is nothing to commit."""
         self.run("add", "--", *paths)
         if not self.run("diff", "--cached", "--name-only"):
             return None
@@ -108,10 +108,10 @@ class GitRepo:
         sha = self.run("rev-parse", "HEAD", check=False)
         return sha or None
 
-    # -- lecture -------------------------------------------------------------
+    # -- reading -------------------------------------------------------------
 
     def history(self, relative_path: str, limit: int = 50) -> list[Commit]:
-        """Historique d'un fichier, en suivant les renommages."""
+        """History of a file, following renames."""
         output = self.run(
             "log",
             f"--max-count={limit}",
@@ -136,9 +136,9 @@ class GitRepo:
         return commits
 
     def changed_files(self, since_commit: str | None) -> list[tuple[str, str]]:
-        """Fichiers modifiés depuis un commit, sous forme (statut, chemin).
+        """Files changed since a commit, as (status, path).
 
-        Sans commit de départ, retourne tous les fichiers suivis en 'A'.
+        Without a starting commit, returns every tracked file as 'A'.
         """
         if since_commit is None:
             return [("A", path) for path in self.run("ls-files").splitlines() if path]
@@ -156,7 +156,7 @@ class GitRepo:
         content = self.run("show", f"{revision}:{relative_path}", check=False)
         return content or None
 
-    # -- synchronisation (phase 2) -------------------------------------------
+    # -- synchronization (phase 2) -------------------------------------------
 
     def pull_rebase(self, remote: str = "origin") -> None:
         self.run("pull", "--rebase", remote, self.default_branch)

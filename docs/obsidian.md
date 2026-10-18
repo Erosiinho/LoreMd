@@ -1,41 +1,41 @@
-# Ouvrir un espace dans Obsidian
+# Opening a space in Obsidian
 
-Un espace est un dépôt git ordinaire. Un humain le clone et l'ouvre comme un
-coffre Obsidian.
+A space is an ordinary git repository. A human clones it and opens it as an
+Obsidian vault.
 
 ```bash
-git clone git@gitlab.acme.com:memoire/produit.git ~/Obsidian/produit
+git clone git@gitlab.acme.com:memory/product.git ~/Obsidian/product
 ```
 
-Dans Obsidian : *Ouvrir un dossier comme coffre* → `~/Obsidian/produit`.
+In Obsidian: *Open folder as vault* → `~/Obsidian/product`.
 
-## Ce qu'on peut faire
+## What you can do
 
-- Lire, corriger, enrichir les mémoires. Le frontmatter s'affiche comme
-  propriétés : `type`, `project`, `tags`, `status`, `verified`.
-- Passer `verified: true` sur une mémoire relue : la provenance renvoyée aux
-  agents le signalera.
-- Passer `status: rejected` sur une mémoire fausse plutôt que de la supprimer —
-  l'historique reste lisible.
-- Créer une mémoire à la main : la ranger dans le bon dossier, avec au minimum
-  `id`, `type`, `title`, `created` et `updated`. Un `id` ULID se génère avec
+- Read, fix and enrich memories. The frontmatter shows up as properties:
+  `type`, `project`, `tags`, `status`, `verified`.
+- Set `verified: true` on a reviewed memory: the provenance returned to agents
+  will say so.
+- Set `status: rejected` on a wrong memory rather than deleting it — the history
+  stays readable.
+- Create a memory by hand: put it in the right folder, with at least `id`,
+  `type`, `title`, `created` and `updated`. Generate a ULID `id` with
   `python -c "from loremd.ids import new_ulid; print(new_ulid())"`.
 
-## Comment les changements reviennent dans LoreMd
+## How changes get back into LoreMd
 
 ```bash
-git add . && git commit -m "relecture des décisions produit" && git push
+git add . && git commit -m "review product decisions" && git push
 ```
 
-Le serveur récupère les commits (`loremd space sync`, pull périodique ou
-webhook) et réindexe uniquement les fichiers du diff.
+The server fetches the commits (`loremd space sync`, periodic pull or webhook)
+and reindexes only the files in the diff.
 
-En cas de conflit avec une écriture d'agent, LoreMd rebase. Si le rebase échoue,
-les deux versions sont conservées et la note passe en `status: conflict` pour
-être arbitrée.
+If there is a conflict with an agent write, LoreMd rebases. If the rebase fails,
+both versions are kept and the note gets `status: conflict` so someone can
+resolve it.
 
-## À ne pas faire
+## What not to do
 
-- Ne pas renommer les fichiers sans raison : le nom contient le suffixe d'ID.
-- Ne pas modifier le champ `id`, qui lie le fichier à l'index.
-- Ne pas committer de secret : un hook côté remote le refusera.
+- Do not rename files without a reason: the name contains the ID suffix.
+- Do not change the `id` field, which links the file to the index.
+- Do not commit secrets: a remote-side hook will reject them.

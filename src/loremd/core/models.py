@@ -1,7 +1,7 @@
-"""Modèles du domaine.
+"""Domain models.
 
-Le frontmatter d'un fichier `.md` est la source de vérité ; ces modèles le
-valident à la lecture comme à l'écriture.
+The frontmatter of a `.md` file is the source of truth; these models validate
+it on read and on write.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ class MemoryType(StrEnum):
 
     @property
     def directory(self) -> str:
-        """Dossier de l'espace où vit ce type de mémoire."""
+        """Directory of the space where this memory type lives."""
         return _TYPE_DIRECTORIES[self]
 
 
@@ -47,12 +47,12 @@ class MemoryStatus(StrEnum):
     CONFLICT = "conflict"
 
 
-#: Statuts renvoyés par la recherche quand l'appelant ne demande rien de précis.
+#: Statuses returned by search when the caller asks for nothing specific.
 SEARCHABLE_STATUSES = (MemoryStatus.ACTIVE,)
 
 
 class Frontmatter(BaseModel):
-    """En-tête YAML d'un fichier mémoire."""
+    """YAML header of a memory file."""
 
     model_config = ConfigDict(extra="allow", use_enum_values=False)
 
@@ -82,12 +82,12 @@ class Frontmatter(BaseModel):
     @classmethod
     def _title_not_blank(cls, value: str) -> str:
         if not value.strip():
-            raise ValueError("title ne peut pas être vide")
+            raise ValueError("title cannot be empty")
         return value.strip()
 
 
 class Memory(BaseModel):
-    """Une mémoire : son frontmatter, son corps, et où elle se trouve."""
+    """A memory: its frontmatter, its body, and where it lives."""
 
     frontmatter: Frontmatter
     content: str
@@ -103,7 +103,7 @@ class Memory(BaseModel):
         return content_hash(self.content)
 
     def embedding_text(self) -> str:
-        """Texte soumis au modèle d'embeddings : titre + tags + corps."""
+        """Text fed to the embedding model: title + project + tags + body."""
         fm = self.frontmatter
         parts = [fm.title]
         if fm.project:
@@ -115,7 +115,7 @@ class Memory(BaseModel):
 
 
 class IndexedMemory(BaseModel):
-    """Ligne de `memory_index`, telle que relue par la recherche."""
+    """A `memory_index` row, as read back by search."""
 
     id: str
     space_id: UUID
@@ -135,13 +135,13 @@ class IndexedMemory(BaseModel):
 
 
 class SearchHit(BaseModel):
-    """Résultat de recherche, provenance comprise."""
+    """Search result, provenance included."""
 
     memory: IndexedMemory
     score: float
     rank_text: int | None = None
     rank_vector: int | None = None
-    # Similarité cosinus avec la requête, si la mémoire a été trouvée côté vectoriel.
+    # Cosine similarity with the query, if the memory was found by vector search.
     similarity: float | None = None
 
 
@@ -161,5 +161,5 @@ class Space(BaseModel):
 
 
 def content_hash(content: str) -> str:
-    """Hash stable du corps, utilisé pour éviter les réindexations inutiles."""
+    """Stable hash of the body, used to skip needless reindexing."""
     return hashlib.sha256(content.strip().encode("utf-8")).hexdigest()

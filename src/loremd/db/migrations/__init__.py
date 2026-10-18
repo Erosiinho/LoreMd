@@ -1,1 +1,1 @@
-"""Migrations SQL, appliquées dans l'ordre alphabétique par `Database.migrate`."""
+"""SQL migrations, applied in alphabetical order by `Database.migrate`."""

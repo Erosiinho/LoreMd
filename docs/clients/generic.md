@@ -1,15 +1,15 @@
-# Client générique
+# Generic client
 
-LoreMd expose un serveur MCP standard en Streamable HTTP. Tout client conforme
-fonctionne avec trois informations :
+LoreMd exposes a standard MCP server over Streamable HTTP. Any compliant client
+works with three pieces of information:
 
-| Paramètre | Valeur |
+| Setting | Value |
 |---|---|
 | Transport | `streamable-http` |
-| URL | `https://<votre-domaine>/mcp` |
-| En-tête | `Authorization: Bearer lmd_…` |
+| URL | `https://<your-domain>/mcp` |
+| Header | `Authorization: Bearer lmd_…` |
 
-Exemple avec le SDK MCP Python :
+Example with the Python MCP SDK:
 
 ```python
 import asyncio
@@ -17,7 +17,7 @@ import asyncio
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-URL = "https://memoire.acme.com/mcp"
+URL = "https://memory.acme.com/mcp"
 HEADERS = {"Authorization": "Bearer lmd_xxxxxxxx_…"}
 
 
@@ -26,7 +26,7 @@ async def main() -> None:
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(
-                "memory_search", {"query": "choix de base de données", "limit": 5}
+                "memory_search", {"query": "database choice", "limit": 5}
             )
             print(result.content)
 
@@ -34,5 +34,5 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Les réponses sont du JSON : `{"matches": [...], "status": "ok"}` ou
+Responses are JSON: `{"matches": [...], "status": "ok"}` or
 `{"matches": [], "status": "no_match"}`.

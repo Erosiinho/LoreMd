@@ -1,62 +1,62 @@
 # LoreMd
 
-> Mémoire partagée pour agents IA, en Markdown, auto-hébergée.
+> Shared memory for AI agents, in Markdown, self-hosted.
 
-Les agents (Claude Code, Codex, Cursor, bots maison…) enregistrent décisions,
-préférences, règles et contexte projet via **MCP**, et les retrouvent d'une
-session, d'une machine ou d'un agent à l'autre.
+Agents (Claude Code, Codex, Cursor, in-house bots…) record decisions,
+preferences, rules and project context through **MCP**, and find them again
+across sessions, machines and agents.
 
-La mémoire, ce sont **des fichiers Markdown versionnés par git** : lisibles dans
-Obsidian, modifiables à la main, portables. Postgres ne sert qu'à indexer et à
-contrôler les accès — il est reconstructible par `loremd reindex`.
+The memory is **Markdown files versioned with git**: readable in Obsidian,
+editable by hand, portable. Postgres is only used for indexing and access
+control — it can be rebuilt with `loremd reindex`.
 
-Le plan produit complet est dans [PLAN.md](PLAN.md).
+The full product plan is in [PLAN.md](PLAN.md).
 
-## Démarrage
+## Getting started
 
 ```bash
-cp config.example.yaml config.yaml   # domaine, modèle d'embeddings
-cp .env.example .env                 # mots de passe, token d'amorçage
+cp config.example.yaml config.yaml   # domain, embedding model
+cp .env.example .env                 # passwords, bootstrap token
 docker compose up -d
 
-docker compose exec app loremd space create produit \
-    --remote git@gitlab.acme.com:memoire/produit.git
-docker compose exec app loremd agent create codex-ci --space produit --scope read,write
-# → affiche le token une seule fois
+docker compose exec app loremd space create product \
+    --remote git@gitlab.acme.com:memory/product.git
+docker compose exec app loremd agent create codex-ci --space product --scope read,write
+# → prints the token once
 ```
 
-Vérifier l'installation :
+Check the installation:
 
 ```bash
 docker compose exec app loremd doctor
-curl https://memoire.acme.com/healthz
+curl https://memory.acme.com/healthz
 ```
 
-Puis connecter un agent : voir [docs/clients/](docs/clients/README.md).
+Then connect an agent: see [docs/clients/](docs/clients/README.md).
 
 ## Architecture
 
 ```
-Agents ──HTTPS + Bearer──► Caddy ──► API MCP (/mcp) ──► Core ──► Espaces (git)
+Agents ──HTTPS + Bearer──► Caddy ──► MCP API (/mcp) ──► Core ──► Spaces (git)
                                                            └──► Postgres (index)
-Humains ──git clone──► remote git par espace ──► Obsidian
+Humans ──git clone──► per-space git remote ──► Obsidian
 ```
 
-| Paquet | Rôle |
+| Package | Role |
 |---|---|
-| `loremd.core` | Fichiers, commits, recherche, dédup, ACL, audit. Ne connaît ni MCP ni HTTP. |
-| `loremd.db` | Index Postgres (pgvector + tsvector), migrations, requêtes. |
-| `loremd.embeddings` | fastembed en local par défaut, API compatible OpenAI en option. |
-| `loremd.auth` | Tokens d'agent, scopes, cloisonnement par espace. |
-| `loremd.api` | Serveur MCP (Streamable HTTP) et application ASGI. |
-| `loremd.cli` | Administration : espaces, agents, tokens, réindexation, audit. |
+| `loremd.core` | Files, commits, search, dedup, ACL, audit. Knows nothing about MCP or HTTP. |
+| `loremd.db` | Postgres index (pgvector + tsvector), migrations, queries. |
+| `loremd.embeddings` | Local fastembed by default, OpenAI-compatible API as an option. |
+| `loremd.auth` | Agent tokens, scopes, per-space isolation. |
+| `loremd.api` | MCP server (Streamable HTTP) and ASGI application. |
+| `loremd.cli` | Administration: spaces, agents, tokens, reindexing, audit. |
 
-## Format des mémoires
+## Memory format
 
-Un espace est un dépôt git ; une mémoire est un fichier.
+A space is a git repository; a memory is a file.
 
 ```
-produit/
+product/
 ├── decisions/api-stack-postgres-drizzle-abcdef.md
 ├── preferences/
 ├── rules/
@@ -69,53 +69,53 @@ produit/
 ---
 id: 01JA8KZ3M9X2QH7R4T6VABCDEF
 type: decision
-title: Stack API — Postgres + Drizzle
+title: API stack — Postgres + Drizzle
 project: shop
 tags: [backend, db]
 status: active
 verified: false
-source: session claude-code
+source: claude-code session
 author: claude-code-macbook
 created: '2026-10-14T10:42:00+02:00'
 updated: '2026-10-14T10:42:00+02:00'
 supersedes: null
 ---
 
-On utilise Postgres avec Drizzle comme ORM pour l'API du shop.
+We use Postgres with Drizzle as the ORM for the shop API.
 ```
 
-Statuts : `active`, `pending`, `superseded`, `rejected`, `conflict`. Seules les
-mémoires `active` ressortent dans la recherche.
+Statuses: `active`, `pending`, `superseded`, `rejected`, `conflict`. Only
+`active` memories show up in search.
 
-## Outils MCP
+## MCP tools
 
-| Outil | Rôle |
+| Tool | Role |
 |---|---|
-| `spaces_list()` | Espaces accessibles au token |
-| `memory_search(query, space?, project?, type?, limit)` | Recherche hybride ; `status: no_match` si rien ne correspond |
-| `memory_get(id)` | Mémoire complète avec sa provenance |
-| `memory_write(content, type, space, …)` | Crée une mémoire, ou renvoie le quasi-doublon existant |
-| `memory_update(id, content, reason)` | Modifie ; `reason` devient le message de commit |
-| `memory_supersede(id, new_content, reason)` | Remplace ; l'ancienne passe en `superseded` |
-| `memory_history(id)` | Historique git de la mémoire |
+| `spaces_list()` | Spaces the token can access |
+| `memory_search(query, space?, project?, type?, limit)` | Hybrid search; `status: no_match` when nothing matches |
+| `memory_get(id)` | Full memory with its provenance |
+| `memory_write(content, type, space, …)` | Creates a memory, or returns the existing near-duplicate |
+| `memory_update(id, content, reason)` | Changes a memory; `reason` becomes the commit message |
+| `memory_supersede(id, new_content, reason)` | Replaces a memory; the old one becomes `superseded` |
+| `memory_history(id)` | Git history of the memory |
 
-## Commandes
+## Commands
 
 ```bash
 loremd space create <slug> [--remote URL] [--review]
 loremd space list
 loremd space sync [<slug>] [--pull/--no-pull] [--push]
-loremd agent create <nom> --space <slug> --scope read,write
+loremd agent create <name> --space <slug> --scope read,write
 loremd token create <agent> --space <slug> [--expires-days 90]
-loremd token revoke <prefixe>
+loremd token revoke <prefix>
 loremd reindex [<slug>]
-loremd search "<requête>" [--space <slug>]
+loremd search "<query>" [--space <slug>]
 loremd audit --limit 50
 loremd doctor
 loremd serve
 ```
 
-## Développement
+## Development
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -124,23 +124,23 @@ pytest
 ruff check src tests
 ```
 
-Les tests de cette suite ne demandent ni Postgres ni réseau : ils couvrent le
-format de fichier, les identifiants, la détection de secrets, les tokens, les
-droits et les opérations git. Les chemins qui touchent la base se testent contre
-une instance Postgres avec pgvector (`docker compose up postgres`).
+The tests in this suite need neither Postgres nor the network: they cover the
+file format, identifiers, secret detection, tokens, permissions and git
+operations. Code paths that touch the database are tested against a Postgres
+instance with pgvector (`docker compose up postgres`).
 
-## Sécurité
+## Security
 
-- Tokens `lmd_<prefix>_<secret>`, stockés hachés en SHA-256, affichés une seule
-  fois, révocables, avec expiration et liste d'IP optionnelle.
-- Scopes `read` / `write` / `admin`, combinés à une liste d'espaces : un token ne
-  voit rien en dehors des siens.
-- Détection de secrets à l'écriture : l'appel est refusé, rien n'est committé.
-- Le contenu des mémoires est renvoyé aux agents comme une **donnée**, jamais
-  comme une instruction (voir `loremd/instructions.py`).
+- Tokens `lmd_<prefix>_<secret>`, stored as SHA-256 hashes, shown once,
+  revocable, with expiry and an optional IP allowlist.
+- Scopes `read` / `write` / `admin`, combined with a list of spaces: a token
+  sees nothing outside its own spaces.
+- Secret detection on write: the call is rejected and nothing is committed.
+- Memory content is returned to agents as **data**, never as instructions (see
+  `loremd/instructions.py`).
 
-## État d'avancement
+## Status
 
-Phase 0–1 du plan : core, MCP, index hybride, tokens, CLI, Docker Compose.
-À venir : synchro git bidirectionnelle complète (watcher, webhooks, conflits),
-console d'administration, SSO et métriques.
+Phases 0–1 of the plan: core, MCP, hybrid index, tokens, CLI, Docker Compose.
+Coming next: full two-way git sync (watcher, webhooks, conflicts), admin
+console, SSO and metrics.

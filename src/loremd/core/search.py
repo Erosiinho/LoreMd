@@ -1,8 +1,8 @@
-"""Recherche hybride.
+"""Hybrid search.
 
-Plein texte et vectoriel sont lancés sur le même ensemble filtré, puis fusionnés
-par RRF. En dessous du seuil de pertinence, on répond `no_match` plutôt que de
-renvoyer du bruit : c'est un principe du produit, pas un détail d'implémentation.
+Full-text and vector search run over the same filtered set, then get merged
+with RRF. Below the relevance threshold we answer `no_match` rather than return
+noise: that is a product principle, not an implementation detail.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ class SearchService:
     ) -> SearchResponse:
         principal.require_scope(Scope.READ)
         if not query.strip():
-            raise ValidationError("query est vide")
+            raise ValidationError("query is empty")
 
         config = self._settings.search
         effective_limit = min(limit or config.default_limit, config.max_limit)
@@ -75,9 +75,9 @@ class SearchService:
                 candidate_pool=max(effective_limit * 5, config.max_limit),
             )
 
-        # Le score RRF ne reflète que des rangs : il ne dit pas si un résultat est
-        # pertinent. On filtre donc sur des signaux absolus — un match plein texte,
-        # ou une similarité cosinus suffisante — et le RRF ne sert qu'à ordonner.
+        # The RRF score only reflects ranks: it says nothing about whether a hit is
+        # relevant. So we filter on absolute signals — a full-text match, or a high
+        # enough cosine similarity — and RRF is only used for ordering.
         kept = [
             hit
             for hit in hits

@@ -10,7 +10,7 @@ from loremd.errors import GitError
 
 @pytest.fixture
 def repo(tmp_path: Path) -> GitRepo:
-    repository = GitRepo(tmp_path / "produit")
+    repository = GitRepo(tmp_path / "product")
     repository.init()
     return repository
 
@@ -22,14 +22,14 @@ def write(repo: GitRepo, relative: str, content: str) -> str:
     return relative
 
 
-def test_init_est_idempotent(repo: GitRepo) -> None:
+def test_init_is_idempotent(repo: GitRepo) -> None:
     repo.init()
 
     assert repo.exists
 
 
-def test_le_commit_porte_le_nom_de_l_agent(repo: GitRepo) -> None:
-    path = write(repo, "decisions/a.md", "première version")
+def test_commit_carries_the_agent_name(repo: GitRepo) -> None:
+    path = write(repo, "decisions/a.md", "first version")
 
     sha = repo.commit(
         [path], "decision: a", author_name="claude-code", author_email="claude@agents.local"
@@ -41,30 +41,30 @@ def test_le_commit_porte_le_nom_de_l_agent(repo: GitRepo) -> None:
     assert commits[0].message == "decision: a"
 
 
-def test_commit_sans_changement_ne_cree_rien(repo: GitRepo) -> None:
-    path = write(repo, "decisions/a.md", "contenu")
+def test_commit_without_changes_creates_nothing(repo: GitRepo) -> None:
+    path = write(repo, "decisions/a.md", "content")
     repo.commit([path], "decision: a", author_name="agent", author_email="a@b.c")
 
-    assert repo.commit([path], "rien", author_name="agent", author_email="a@b.c") is None
+    assert repo.commit([path], "nothing", author_name="agent", author_email="a@b.c") is None
 
 
-def test_history_remonte_les_versions(repo: GitRepo) -> None:
+def test_history_lists_versions(repo: GitRepo) -> None:
     path = write(repo, "decisions/a.md", "v1")
     repo.commit([path], "decision: a", author_name="agent", author_email="a@b.c")
     write(repo, "decisions/a.md", "v2")
-    repo.commit([path], "update: a — correction", author_name="humain", author_email="h@b.c")
+    repo.commit([path], "update: a — fix", author_name="human", author_email="h@b.c")
 
     commits = repo.history(path)
 
-    assert [commit.message for commit in commits] == ["update: a — correction", "decision: a"]
+    assert [commit.message for commit in commits] == ["update: a — fix", "decision: a"]
 
 
-def test_changed_files_liste_le_diff_depuis_un_commit(repo: GitRepo) -> None:
+def test_changed_files_lists_the_diff_since_a_commit(repo: GitRepo) -> None:
     first = write(repo, "decisions/a.md", "v1")
     base = repo.commit([first], "decision: a", author_name="agent", author_email="a@b.c")
     second = write(repo, "notes/b.md", "note")
     (repo.path / "decisions/a.md").unlink()
-    repo.commit([second, first], "lot suivant", author_name="agent", author_email="a@b.c")
+    repo.commit([second, first], "next batch", author_name="agent", author_email="a@b.c")
 
     changes = dict((path, status) for status, path in repo.changed_files(base))
 
@@ -72,13 +72,13 @@ def test_changed_files_liste_le_diff_depuis_un_commit(repo: GitRepo) -> None:
     assert changes[first] == "D"
 
 
-def test_changed_files_sans_base_liste_tout(repo: GitRepo) -> None:
-    path = write(repo, "facts/c.md", "fait")
+def test_changed_files_without_base_lists_everything(repo: GitRepo) -> None:
+    path = write(repo, "facts/c.md", "fact")
     repo.commit([path], "fact: c", author_name="agent", author_email="a@b.c")
 
     assert repo.changed_files(None) == [("A", path)]
 
 
-def test_une_commande_git_en_echec_leve(repo: GitRepo) -> None:
+def test_failing_git_command_raises(repo: GitRepo) -> None:
     with pytest.raises(GitError):
-        repo.run("checkout", "branche-inexistante")
+        repo.run("checkout", "missing-branch")

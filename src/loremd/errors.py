@@ -1,11 +1,11 @@
-"""Erreurs du domaine.
+"""Domain errors.
 
-Le core lève ces erreurs ; les couches MCP et CLI décident comment les montrer.
+The core raises them; the MCP and CLI layers decide how to present them.
 """
 
 
 class LoremdError(Exception):
-    """Erreur de base."""
+    """Base error."""
 
     code = "error"
 

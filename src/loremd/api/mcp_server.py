@@ -1,7 +1,7 @@
-"""Serveur MCP : une fine couche au-dessus du core.
+"""MCP server: a thin layer on top of the core.
 
-Sept outils, pas plus : des agents suivent mieux un petit jeu d'outils bien
-décrits. Chaque appel ré-authentifie le token et refiltre les espaces.
+Seven tools, no more: agents follow a small set of well-described tools better.
+Every call re-authenticates the token and re-filters spaces.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class ToolFailure(Exception):
-    """Erreur renvoyée à l'agent, formulée pour qu'il puisse se corriger."""
+    """Error returned to the agent, worded so it can correct itself."""
 
 
 def _fail(error: LoremdError) -> ToolFailure:
@@ -37,7 +37,7 @@ def _fail(error: LoremdError) -> ToolFailure:
 
 
 def build_mcp(core: Loremd) -> FastMCP:
-    """Construit le serveur MCP branché sur un core déjà configuré."""
+    """Builds the MCP server wired to an already configured core."""
 
     mcp = FastMCP(
         name="loremd",
@@ -71,7 +71,7 @@ def build_mcp(core: Loremd) -> FastMCP:
             memory_type = MemoryType(type) if type else None
         except ValueError as error:
             raise ToolFailure(
-                f"type inconnu : {type}. Valeurs possibles : "
+                f"unknown type: {type}. Allowed values: "
                 + ", ".join(t.value for t in MemoryType)
             ) from error
         try:
@@ -91,7 +91,7 @@ def build_mcp(core: Loremd) -> FastMCP:
             return {
                 "matches": [],
                 "status": "no_match",
-                "hint": "Rien de pertinent en mémoire pour cette requête.",
+                "hint": "Nothing relevant in memory for this query.",
             }
         return {
             "matches": [hit_to_dict(hit) for hit in response.matches],
@@ -121,7 +121,7 @@ def build_mcp(core: Loremd) -> FastMCP:
             memory_type = MemoryType(type)
         except ValueError as error:
             raise ToolFailure(
-                f"type inconnu : {type}. Valeurs possibles : "
+                f"unknown type: {type}. Allowed values: "
                 + ", ".join(t.value for t in MemoryType)
             ) from error
         try:

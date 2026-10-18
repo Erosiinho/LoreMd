@@ -1,4 +1,4 @@
-"""Embeddings via une API compatible OpenAI (option : les textes sortent du serveur)."""
+"""Embeddings through an OpenAI-compatible API (optional: text leaves the server)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from .base import EmbeddingProvider, normalize
 class OpenAIProvider(EmbeddingProvider):
     def __init__(self, model: str, dimensions: int, api_base: str, api_key: str | None) -> None:
         if not api_key:
-            raise ConfigError("embeddings.api_key est requis quand provider = openai")
+            raise ConfigError("embeddings.api_key is required when provider = openai")
         self.model = model
         self.dimensions = dimensions
         self.api_base = api_base.rstrip("/")
@@ -22,8 +22,8 @@ class OpenAIProvider(EmbeddingProvider):
             return []
         try:
             import httpx
-        except ImportError as exc:  # pragma: no cover - dépendance optionnelle
-            raise ConfigError("httpx est requis : `pip install 'loremd[openai]'`") from exc
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise ConfigError("httpx is required: `pip install 'loremd[openai]'`") from exc
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(

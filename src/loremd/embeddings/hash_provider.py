@@ -1,7 +1,7 @@
-"""Embeddings déterministes par hachage.
+"""Deterministic hash-based embeddings.
 
-Aucune qualité sémantique : sert aux tests et aux démarrages à froid sans
-téléchargement de modèle. La recherche reste utilisable grâce au plein texte.
+No semantic quality at all: used for tests and cold starts without a model
+download. Search stays usable thanks to full-text matching.
 """
 
 from __future__ import annotations

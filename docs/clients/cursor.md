@@ -1,18 +1,17 @@
 # Cursor
 
-Dans `~/.cursor/mcp.json` (global) ou `.cursor/mcp.json` (projet) :
+In `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
 
 ```json
 {
   "mcpServers": {
     "loremd": {
-      "url": "https://memoire.acme.com/mcp",
+      "url": "https://memory.acme.com/mcp",
       "headers": { "Authorization": "Bearer lmd_xxxxxxxx_…" }
     }
   }
 }
 ```
 
-Un fichier `.cursor/mcp.json` versionné ne doit **pas** contenir le token :
-utiliser le fichier global, ou une variable d'environnement si la version de
-Cursor le permet.
+A versioned `.cursor/mcp.json` must **not** contain the token: use the global
+file, or an environment variable if your Cursor version supports it.
