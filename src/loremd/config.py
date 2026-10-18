@@ -40,7 +40,7 @@ class SpacesConfig(BaseModel):
 
 class EmbeddingsConfig(BaseModel):
     provider: Literal["fastembed", "openai", "hash"] = "fastembed"
-    model: str = "intfloat/multilingual-e5-small"
+    model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     dimensions: int = 384
     api_base: str = "https://api.openai.com/v1"
     api_key: str | None = None
@@ -50,7 +50,7 @@ class SearchConfig(BaseModel):
     default_limit: int = 8
     max_limit: int = 50
     rrf_k: int = 60
-    min_score: float = 0.02
+    min_similarity: float = 0.4
 
 
 class WriteConfig(BaseModel):

@@ -52,6 +52,8 @@ def hit_to_dict(hit: SearchHit) -> dict[str, Any]:
     payload = memory_to_dict(hit.memory)
     payload["score"] = round(hit.score, 6)
     payload["matched_by"] = _matched_by(hit)
+    if hit.similarity is not None:
+        payload["similarity"] = round(hit.similarity, 4)
     return payload
 
 

@@ -18,13 +18,13 @@ def test_les_valeurs_par_defaut_suffisent_a_demarrer() -> None:
 def test_le_yaml_surcharge_les_defauts(tmp_path: Path) -> None:
     config = tmp_path / "config.yaml"
     config.write_text(
-        "server:\n  port: 9100\nsearch:\n  min_score: 0.5\n", encoding="utf-8"
+        "server:\n  port: 9100\nsearch:\n  min_similarity: 0.5\n", encoding="utf-8"
     )
 
     settings = load_settings(config)
 
     assert settings.server.port == 9100
-    assert settings.search.min_score == 0.5
+    assert settings.search.min_similarity == 0.5
     assert settings.server.host == "0.0.0.0"
 
 

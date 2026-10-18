@@ -68,20 +68,22 @@ def build_mcp(core: Loremd) -> FastMCP:
         limit: int = 8,
     ) -> dict[str, Any]:
         try:
+            memory_type = MemoryType(type) if type else None
+        except ValueError as error:
+            raise ToolFailure(
+                f"type inconnu : {type}. Valeurs possibles : "
+                + ", ".join(t.value for t in MemoryType)
+            ) from error
+        try:
             who = await principal()
             response = await core.search.search(
                 who,
                 query=query,
                 space_slug=space,
                 project=project,
-                memory_type=MemoryType(type) if type else None,
+                memory_type=memory_type,
                 limit=limit,
             )
-        except ValueError as error:
-            raise ToolFailure(
-                f"type inconnu : {type}. Valeurs possibles : "
-                + ", ".join(t.value for t in MemoryType)
-            ) from error
         except LoremdError as error:
             raise _fail(error) from error
 

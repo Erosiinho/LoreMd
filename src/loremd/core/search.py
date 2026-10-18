@@ -75,7 +75,15 @@ class SearchService:
                 candidate_pool=max(effective_limit * 5, config.max_limit),
             )
 
-        kept = [hit for hit in hits if hit.score >= config.min_score]
+        # Le score RRF ne reflète que des rangs : il ne dit pas si un résultat est
+        # pertinent. On filtre donc sur des signaux absolus — un match plein texte,
+        # ou une similarité cosinus suffisante — et le RRF ne sert qu'à ordonner.
+        kept = [
+            hit
+            for hit in hits
+            if hit.rank_text is not None
+            or (hit.similarity is not None and hit.similarity >= config.min_similarity)
+        ]
         await self._audit.record(
             principal,
             "memory_search",
