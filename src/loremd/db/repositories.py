@@ -137,6 +137,15 @@ class MemoryIndexRepository:
         self, memory: Memory, space_id: UUID, embedding: Sequence[float] | None
     ) -> None:
         fm = memory.frontmatter
+        # A human can replace the file at a path with one carrying a new id.
+        # (space_id, path) is unique, so the stale row has to go first, or the
+        # insert below would hit a constraint instead of reindexing.
+        await self.c.execute(
+            "DELETE FROM memory_index WHERE space_id = $1 AND path = $2 AND id <> $3",
+            space_id,
+            memory.path,
+            fm.id,
+        )
         await self.c.execute(
             """
             INSERT INTO memory_index (

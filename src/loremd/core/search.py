@@ -14,8 +14,23 @@ from ..db.repositories import MemoryIndexRepository
 from ..embeddings import EmbeddingProvider
 from ..errors import ValidationError
 from .audit import AuditService
-from .models import SEARCHABLE_STATUSES, MemoryStatus, MemoryType, SearchResponse
+from .models import SEARCHABLE_STATUSES, MemoryStatus, MemoryType, SearchHit, SearchResponse
 from .spaces import SpaceService
+
+
+def relevant_hits(hits: list[SearchHit], min_similarity: float) -> list[SearchHit]:
+    """Keeps only the hits backed by an absolute relevance signal.
+
+    The RRF score only reflects ranks: the best of three bad results still
+    ranks first. So a hit survives on a full-text match, or on a cosine
+    similarity above the threshold — and RRF is used purely for ordering.
+    """
+    return [
+        hit
+        for hit in hits
+        if hit.rank_text is not None
+        or (hit.similarity is not None and hit.similarity >= min_similarity)
+    ]
 
 
 class SearchService:
@@ -75,15 +90,7 @@ class SearchService:
                 candidate_pool=max(effective_limit * 5, config.max_limit),
             )
 
-        # The RRF score only reflects ranks: it says nothing about whether a hit is
-        # relevant. So we filter on absolute signals — a full-text match, or a high
-        # enough cosine similarity — and RRF is only used for ordering.
-        kept = [
-            hit
-            for hit in hits
-            if hit.rank_text is not None
-            or (hit.similarity is not None and hit.similarity >= config.min_similarity)
-        ]
+        kept = relevant_hits(hits, config.min_similarity)
         await self._audit.record(
             principal,
             "memory_search",

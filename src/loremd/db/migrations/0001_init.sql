@@ -6,8 +6,9 @@
 -- __EMBEDDING_DIM__ is replaced, when the migration is applied, by the
 -- dimension of the configured embedding model.
 
+-- gen_random_uuid() is built into Postgres 13 and later, so pgcrypto is not
+-- required: one less extension to have available on the server.
 CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS spaces (
     id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
