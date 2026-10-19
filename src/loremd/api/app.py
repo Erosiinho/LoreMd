@@ -23,8 +23,11 @@ def create_app(settings: Settings | None = None, *, core: Loremd | None = None) 
     settings = settings or get_settings()
     service = core or Loremd(settings)
     mcp = build_mcp(service)
-    # The sub-path comes from the mount: otherwise the route would become /mcp/mcp.
-    mcp.settings.streamable_http_path = "/"
+    # The MCP app keeps the full path and is mounted at the root, so /mcp is
+    # served as is. Mounting it under /mcp instead would make Starlette answer
+    # a bare POST /mcp with a 307 to /mcp/ — and a client that drops the
+    # Authorization header or the body on redirect would silently fail.
+    mcp.settings.streamable_http_path = MCP_MOUNT_PATH
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -66,7 +69,8 @@ def create_app(settings: Settings | None = None, *, core: Loremd | None = None) 
             "transport": "streamable-http",
         }
 
-    app.mount(MCP_MOUNT_PATH, CallContextMiddleware(mcp.streamable_http_app()))
+    # Registered last: the routes above keep their priority.
+    app.mount("/", CallContextMiddleware(mcp.streamable_http_app()))
     return app
 
 

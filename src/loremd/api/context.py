@@ -18,13 +18,15 @@ class CallContext:
     ip: str | None
 
 
-_current: ContextVar[CallContext] = ContextVar(
-    "loremd_call_context", default=CallContext(None, None)
-)
+#: No default instance: a mutable default shared by every context would be a
+#: trap. An unset context means "no HTTP request", i.e. no token.
+_current: ContextVar[CallContext | None] = ContextVar("loremd_call_context", default=None)
+
+_NO_CALL = CallContext(None, None)
 
 
 def current_context() -> CallContext:
-    return _current.get()
+    return _current.get() or _NO_CALL
 
 
 def _client_ip(scope: Scope) -> str | None:
@@ -47,8 +49,36 @@ def _bearer(scope: Scope) -> str | None:
     return None
 
 
+_UNAUTHORIZED_BODY = (
+    b'{"error":"unauthorized: missing token, use the '
+    b'Authorization: Bearer header"}'
+)
+
+
+async def _unauthorized(send: Send) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 401,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(_UNAUTHORIZED_BODY)).encode()),
+                (b"www-authenticate", b"Bearer"),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": _UNAUTHORIZED_BODY})
+
+
 class CallContextMiddleware:
-    """Captures the token and IP of every HTTP request."""
+    """Captures the token and IP of every HTTP request.
+
+    A request with no bearer token is turned away here, before the MCP
+    handshake: machine access goes through tokens, so an anonymous client
+    should get a clear 401 rather than a session that fails on its first tool
+    call. The token itself is verified per call, where revocation and expiry
+    are enforced.
+    """
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -58,6 +88,9 @@ class CallContextMiddleware:
             await self.app(scope, receive, send)
             return
         token = _bearer(scope)
+        if token is None:
+            await _unauthorized(send)
+            return
         reset = _current.set(CallContext(token=token, ip=_client_ip(scope)))
         try:
             await self.app(scope, receive, send)
