@@ -1,8 +1,9 @@
 {$LOREMD_DOMAIN} {
 	encode gzip
 
-	# Coarse rate limit at the proxy; fine-grained per-token limits are
-	# handled by the application (phase 1).
+	# Coarse routing here; the per-token rate limit lives in the application
+	# (see `limits` in config.yaml), which is the only layer that knows which
+	# token a request carries.
 	@mcp path /mcp*
 	handle @mcp {
 		reverse_proxy app:8000
