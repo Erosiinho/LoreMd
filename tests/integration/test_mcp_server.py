@@ -1,7 +1,7 @@
 """The MCP surface, over real HTTP, with real tokens.
 
 This is the phase 1 success criterion seen from an agent's side: point an MCP
-client at the instance with a bearer token and get the seven tools.
+client at the instance with a bearer token and get the tools.
 """
 
 from __future__ import annotations
@@ -37,6 +37,8 @@ TOOL_NAMES = {
     "memory_update",
     "memory_supersede",
     "memory_history",
+    "handoff_save",
+    "context_resume",
 }
 
 
@@ -99,13 +101,20 @@ def served(settings: Settings, tmp_path) -> Iterator[ServedInstance]:
         async with service.db.acquire() as connection:
             agents = AgentRepository(connection)
             tokens = TokenRepository(connection)
-            for name, scopes, space_ids, expires_at in (
-                ("writer", ["read", "write"], [product.id], None),
-                ("reader", ["read"], [product.id], None),
-                ("stale", ["read", "write"], [product.id], datetime.now(UTC) - timedelta(days=1)),
-                ("other-space", ["read", "write"], [support.id], None),
+            for name, scopes, space_ids, expires_at, review in (
+                ("writer", ["read", "write"], [product.id], None, False),
+                ("reader", ["read"], [product.id], None, False),
+                (
+                    "stale",
+                    ["read", "write"],
+                    [product.id],
+                    datetime.now(UTC) - timedelta(days=1),
+                    False,
+                ),
+                ("other-space", ["read", "write"], [support.id], None, False),
+                ("reviewed", ["read", "write"], [product.id], None, True),
             ):
-                agent = await agents.create(name)
+                agent = await agents.create(name, review_required=review)
                 parts, digest = generate_token()
                 await tokens.create(
                     agent_id=agent["id"],
@@ -202,7 +211,7 @@ def test_the_documented_endpoint_needs_no_redirect(served: ServedInstance) -> No
 # --------------------------------------------------------------------- tools
 
 
-async def test_the_seven_tools_are_exposed(served: ServedInstance) -> None:
+async def test_the_nine_tools_are_exposed(served: ServedInstance) -> None:
     async with served.session(served.tokens["writer"]) as session:
         tools = await session.list_tools()
 
@@ -353,6 +362,164 @@ async def test_a_secret_is_refused_with_its_code(served: ServedInstance) -> None
 
     assert result.isError
     assert "secret_detected" in result.content[0].text
+
+
+# ------------------------------------------------------------------ handoffs
+
+HANDOFF = {
+    "space": "product",
+    "title": "Shop API — auth refactor",
+    "summary": "Moving the shop API from sessions to JWT.",
+    "decisions": ["Access tokens expire after 15 minutes."],
+    "progress": ["Login endpoint migrated"],
+    "open_questions": ["Keep the session cookie for the admin?"],
+    "next_actions": ["Finish the refresh endpoint"],
+    "project": "shop",
+}
+
+
+async def test_a_handoff_saved_by_one_agent_is_resumed_by_another(
+    served: ServedInstance,
+) -> None:
+    """Claude Code checkpoints on one machine, Codex picks up on another."""
+    async with served.session(served.tokens["writer"]) as session:
+        saved = payload(await session.call_tool("handoff_save", HANDOFF))
+
+    assert saved["created"] is True
+    assert saved["type"] == "handoff"
+    assert saved["status"] == "active"
+    assert saved["path"].startswith("handoffs/shop-api-auth-refactor-")
+    assert saved["supersedes"] is None
+
+    async with served.session(served.tokens["reader"]) as session:
+        resumed = payload(
+            await session.call_tool("context_resume", {"space": "product", "project": "shop"})
+        )
+
+    assert resumed["status"] == "ok"
+    [handoff] = resumed["handoffs"]
+    assert handoff["id"] == saved["id"]
+    assert handoff["author"] == "writer"
+    assert handoff["title"] == "Shop API — auth refactor"
+    assert {"id", "type", "title", "author", "updated"} <= handoff.keys()
+    assert "## Next actions\n\n- [ ] Finish the refresh endpoint" in handoff["content"]
+    assert resumed["truncated"] is False
+
+
+async def test_a_second_handoff_supersedes_the_first(served: ServedInstance) -> None:
+    async with served.session(served.tokens["writer"]) as session:
+        first = payload(await session.call_tool("handoff_save", HANDOFF))
+        second = payload(
+            await session.call_tool(
+                "handoff_save",
+                {**HANDOFF, "title": "Shop API — refresh tokens", "summary": "Refresh is next."},
+            )
+        )
+        resumed = payload(
+            await session.call_tool("context_resume", {"space": "product", "project": "shop"})
+        )
+        old = payload(await session.call_tool("memory_get", {"id": first["id"]}))
+
+    assert second["supersedes"] == first["id"]
+    assert [h["id"] for h in resumed["handoffs"]] == [second["id"]]
+    assert resumed["handoffs"][0]["supersedes"] == first["id"]
+    assert old["status"] == "superseded"
+
+
+async def test_resume_ignores_a_handoff_under_review(served: ServedInstance) -> None:
+    async with served.session(served.tokens["reviewed"]) as session:
+        saved = payload(await session.call_tool("handoff_save", HANDOFF))
+        resumed = payload(
+            await session.call_tool("context_resume", {"space": "product", "project": "shop"})
+        )
+
+    assert saved["status"] == "pending"
+    assert "review" in saved["note"]
+    assert resumed["status"] == "no_match"
+
+
+async def test_resume_on_an_empty_space_is_no_match(served: ServedInstance) -> None:
+    async with served.session(served.tokens["reader"]) as session:
+        resumed = payload(await session.call_tool("context_resume", {"space": "product"}))
+
+    assert resumed["status"] == "no_match"
+    assert resumed["handoffs"] == [] and resumed["memories"] == []
+    assert "hint" in resumed
+
+
+async def test_resume_truncates_to_max_chars(served: ServedInstance) -> None:
+    long_progress = [f"Step {index}: migrated endpoint number {index}." for index in range(80)]
+    async with served.session(served.tokens["writer"]) as session:
+        await session.call_tool(
+            "memory_write",
+            {
+                "content": "Access tokens expire after 15 minutes on the shop API.",
+                "type": "decision",
+                "space": "product",
+                "project": "shop",
+            },
+        )
+        await session.call_tool("handoff_save", {**HANDOFF, "progress": long_progress})
+        full = payload(
+            await session.call_tool(
+                "context_resume", {"space": "product", "project": "shop", "query": "tokens"}
+            )
+        )
+        cut = payload(
+            await session.call_tool(
+                "context_resume",
+                {"space": "product", "project": "shop", "query": "tokens", "max_chars": 500},
+            )
+        )
+
+    assert full["truncated"] is False and full["memories"]
+    assert cut["truncated"] is True
+    contents = [entry["content"] for entry in cut["handoffs"] + cut["memories"]]
+    assert sum(len(content) for content in contents) <= 500
+    assert cut["handoffs"][0]["truncated"] is True
+    assert [entry["id"] for entry in cut["omitted"]] == [full["memories"][0]["id"]]
+
+
+async def test_memory_search_leaves_handoffs_out_by_default(served: ServedInstance) -> None:
+    async with served.session(served.tokens["writer"]) as session:
+        saved = payload(await session.call_tool("handoff_save", HANDOFF))
+        default = payload(
+            await session.call_tool("memory_search", {"query": "refresh", "space": "product"})
+        )
+        asked = payload(
+            await session.call_tool(
+                "memory_search", {"query": "refresh", "space": "product", "type": "handoff"}
+            )
+        )
+
+    assert default["status"] == "no_match"
+    assert [match["id"] for match in asked["matches"]] == [saved["id"]]
+
+
+async def test_memory_write_refuses_a_handoff(served: ServedInstance) -> None:
+    async with served.session(served.tokens["writer"]) as session:
+        result = await session.call_tool(
+            "memory_write", {"content": "Where we stopped.", "type": "handoff", "space": "product"}
+        )
+
+    assert result.isError
+    assert "handoff_save" in result.content[0].text
+
+
+async def test_a_read_only_token_cannot_save_a_handoff(served: ServedInstance) -> None:
+    async with served.session(served.tokens["reader"]) as session:
+        result = await session.call_tool("handoff_save", HANDOFF)
+
+    assert result.isError
+    assert "forbidden" in result.content[0].text
+
+
+async def test_server_instructions_point_to_resume_and_handoff(served: ServedInstance) -> None:
+    async with served.connect(served.tokens["writer"]) as (_, handshake):
+        instructions = handshake.instructions or ""
+
+    assert "context_resume" in instructions
+    assert "handoff_save" in instructions
 
 
 # ----------------------------------------------------------------------- acl

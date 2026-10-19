@@ -39,6 +39,7 @@ def test_each_type_has_its_directory() -> None:
         "rules",
         "facts",
         "notes",
+        "handoffs",
     }
 
 
@@ -47,6 +48,7 @@ def test_each_type_has_its_directory() -> None:
     [
         ("decisions/api-stack-abcdef.md", True),
         ("notes/subfolder/note.md", True),
+        ("handoffs/shop-auth-refactor-abcdef.md", True),
         ("README.md", False),
         (".loremd/space.yaml", False),
         ("decisions/draft.txt", False),

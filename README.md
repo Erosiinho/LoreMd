@@ -3,8 +3,9 @@
 > Shared memory for AI agents, in Markdown, self-hosted.
 
 Agents (Claude Code, Codex, Cursor, in-house bots…) record decisions,
-preferences, rules and project context through **MCP**, and find them again
-across sessions, machines and agents.
+preferences, rules and project context through **MCP**, find them again
+across sessions, machines and agents, and pick up where the last session
+stopped.
 
 The memory is **Markdown files versioned with git**: readable in Obsidian,
 editable by hand, portable. Postgres is only used for indexing and access
@@ -40,7 +41,9 @@ docker compose exec app loremd doctor
 curl https://memory.acme.com/healthz
 ```
 
-Then connect an agent: see [docs/clients/](docs/clients/README.md).
+Then connect an agent: see [docs/clients/](docs/clients/README.md), and give
+it the [agent skills](skills/README.md) so it knows when to recall, remember
+and hand off.
 
 ## Architecture
 
@@ -71,6 +74,7 @@ product/
 ├── rules/
 ├── facts/
 ├── notes/
+├── handoffs/
 └── .loremd/space.yaml
 ```
 
@@ -95,6 +99,80 @@ We use Postgres with Drizzle as the ORM for the shop API.
 
 Statuses: `active`, `pending`, `superseded`, `rejected`, `conflict`. Only
 `active` memories show up in search.
+
+## Continue work across sessions
+
+An agent that opens a new session should not have to ask "where were we?".
+Before a session ends, it saves a **handoff**; the next session, on any machine
+and with any agent, starts from it.
+
+```text
+Claude Code (MacBook)                          Codex (CI box), next morning
+handoff_save(space="product", project="shop",  context_resume(space="product",
+  title="Shop API — auth refactor",                           project="shop")
+  summary="…", next_actions=[…])         ──►   → latest handoff + relevant
+                                                 decisions and rules
+```
+
+A handoff is a memory of type `handoff`, stored under `handoffs/`. The server
+renders it from structured fields, with fixed sections, so it reads well in
+Obsidian:
+
+```markdown
+---
+id: 01JAHQ5V0N7X2QH7R4T6VABCDE
+type: handoff
+title: Shop API — auth refactor
+project: shop
+status: active
+author: claude-code-macbook
+created: '2026-10-19T18:02:00+00:00'
+updated: '2026-10-19T18:02:00+00:00'
+supersedes: 01JAGB2M9X2QH7R4T6VABCDEFG
+sources:
+- 01JA8KZ3M9X2QH7R4T6VABCDEF
+---
+
+## Summary
+
+Moving the shop API from sessions to JWT; login is done, refresh is half done.
+
+## Decisions
+
+- Access tokens expire after 15 minutes.
+
+## Progress
+
+- Login endpoint migrated
+
+## Open questions
+
+- Keep the session cookie for the admin console?
+
+## Next actions
+
+- [ ] Finish the refresh endpoint
+```
+
+- **One thread per project.** A new handoff supersedes the project's current
+  one (or the one named in `supersedes`): only the latest is `active`, the
+  earlier ones stay in git.
+- **Same rules as any memory.** Secret detection, review (a handoff under
+  review stays `pending` and `context_resume` keeps returning the previous
+  one until approval), commits signed by the agent, audit.
+- **`sources`** lists the memories the handoff relies on; unknown ids are
+  refused.
+- **`context_resume`** returns the latest active handoff(s) and the most
+  relevant active decisions and rules (hybrid search on `query`, or on the
+  handoff's title and summary), each with id, type, title, author and
+  `updated`. Content is capped at `max_chars`; what does not fit is listed in
+  `omitted`. With nothing to resume it answers `status: no_match`.
+- Handoffs stay out of `memory_search` unless `type="handoff"` is asked for.
+- Files are the truth: `loremd reindex` rebuilds handoffs like any other
+  memory, and `context_resume` answers the same afterwards.
+
+The [`loremd-session`](skills/loremd-session/SKILL.md) skill tells agents when
+to call both tools.
 
 ## Human sync and governance
 
@@ -131,6 +209,11 @@ Setting up the webhook and working in Obsidian: [docs/obsidian.md](docs/obsidian
 | `memory_update(id, content, reason)` | Changes a memory; `reason` becomes the commit message |
 | `memory_supersede(id, new_content, reason)` | Replaces a memory; the old one becomes `superseded` |
 | `memory_history(id)` | Git history of the memory |
+| `handoff_save(space, title, summary, decisions?, progress?, open_questions?, next_actions?, project?, sources?, supersedes?)` | Saves where the session stopped; supersedes the project's previous handoff. Returns id + path |
+| `context_resume(space, project?, query?, limit=5, max_chars=12000)` | Latest active handoff(s) plus the relevant decisions and rules; `status: no_match` when there is nothing |
+
+`memory_search` leaves handoffs out unless `type="handoff"`. The
+[agent skills](skills/README.md) describe when to call which tool.
 
 ## Commands
 
@@ -213,7 +296,8 @@ Phases 0–2 of the plan: core, MCP over Streamable HTTP, hybrid search with
 `no_match`, dedup, agents/tokens/scopes, audit, per-token rate limiting, CLI,
 Docker Compose and Caddy; two-way git sync (background push, periodic and
 webhook pull, incremental reindexing, conflict handling), review queue per
-space or per agent, `verified` flag, and the admin console with TOTP.
+space or per agent, `verified` flag, and the admin console with TOTP. Session
+continuity: handoffs, `context_resume`, and the agent skills pack.
 
 Coming next (phase 3): OIDC SSO for the console, anti-secret pre-receive hook,
 metrics, retention, Helm chart.

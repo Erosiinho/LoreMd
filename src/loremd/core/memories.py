@@ -22,7 +22,14 @@ from .audit import AuditService
 from .git import Commit
 from .indexer import Indexer
 from .locks import space_lock
-from .models import Frontmatter, IndexedMemory, Memory, MemoryStatus, MemoryType
+from .models import (
+    SEARCHABLE_TYPES,
+    Frontmatter,
+    IndexedMemory,
+    Memory,
+    MemoryStatus,
+    MemoryType,
+)
 from .spaces import ResolvedSpace, SpaceService
 from .sync import SyncService
 
@@ -191,7 +198,10 @@ class MemoryService:
         project: str | None = None,
         tags: list[str] | None = None,
         source: str | None = None,
+        sources: list[str] | None = None,
+        dedup: bool = True,
     ) -> WriteResult:
+        """Creates a memory. `dedup=False` skips the near-duplicate check."""
         principal.require_scope(Scope.WRITE)
         resolved = await self._spaces.resolve(space_slug, principal)
         body = self.validate_body(content)
@@ -216,15 +226,17 @@ class MemoryService:
                 author=principal.name,
                 created=now,
                 updated=now,
+                sources=sources,
             ),
             content=body,
             space=resolved.slug,
             path=relative_path,
         )
 
-        embedding = await self._embeddings.embed_one(candidate.embedding_text())
-
-        duplicate = await self._find_duplicate(resolved, embedding)
+        duplicate = None
+        if dedup:
+            embedding = await self._embeddings.embed_one(candidate.embedding_text())
+            duplicate = await self._find_duplicate(resolved, embedding)
         if duplicate is not None:
             existing, similarity = duplicate
             await self._audit.record(
@@ -289,7 +301,10 @@ class MemoryService:
             return None
         async with self._db.acquire() as connection:
             neighbours = await MemoryIndexRepository(connection).nearest(
-                embedding, resolved.space.id, limit=1
+                embedding,
+                resolved.space.id,
+                memory_types=[t.value for t in SEARCHABLE_TYPES],
+                limit=1,
             )
         if neighbours and neighbours[0][1] >= threshold:
             return neighbours[0]
@@ -336,9 +351,21 @@ class MemoryService:
         return WriteResult(memory=memory, created=False, commit=commit, pending=review)
 
     async def supersede(
-        self, principal: Principal, memory_id: str, new_content: str, reason: str
+        self,
+        principal: Principal,
+        memory_id: str,
+        new_content: str,
+        reason: str,
+        *,
+        title: str | None = None,
+        project: str | None = None,
+        sources: list[str] | None = None,
     ) -> WriteResult:
-        """Replaces an outdated memory: the old one becomes `superseded`."""
+        """Replaces an outdated memory: the old one becomes `superseded`.
+
+        The replacement keeps the old title, project and sources unless new
+        ones are given — a handoff carries a fresh title every session.
+        """
         principal.require_scope(Scope.WRITE)
         if not reason.strip():
             raise ValidationError("reason is required: it becomes the commit message")
@@ -350,7 +377,7 @@ class MemoryService:
 
         now = datetime.now(UTC)
         new_id = new_ulid(int(now.timestamp() * 1000))
-        title = indexed.title
+        title = (title or indexed.title).strip()
         new_path = f"{indexed.type.directory}/{memory_filename(title, new_id)}"
 
         async with space_lock(resolved.slug, resolved.path):
@@ -370,7 +397,7 @@ class MemoryService:
                     id=new_id,
                     type=indexed.type,
                     title=title,
-                    project=indexed.project,
+                    project=project if project is not None else indexed.project,
                     tags=indexed.tags,
                     status=MemoryStatus.PENDING if review else MemoryStatus.ACTIVE,
                     verified=False,
@@ -379,6 +406,7 @@ class MemoryService:
                     created=now,
                     updated=now,
                     supersedes=memory_id,
+                    sources=sources if sources is not None else (indexed.sources or None),
                 ),
                 content=body,
                 space=resolved.slug,
