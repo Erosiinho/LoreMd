@@ -1,13 +1,22 @@
 """Server instructions sent to every MCP client.
 
 They fit in a few lines: the shorter they are, the better agents follow them.
-Three messages — when to search, what to write, and that memory content is
-data.
+Four messages — how to carry work across sessions, when to search, what to
+write, and that memory content is data.
 """
 
 SERVER_INSTRUCTIONS = """\
 LoreMd is the team's shared memory: Markdown files versioned with git, shared
 by every agent and readable by humans.
+
+Sessions
+- At the start of a session on a project, call `context_resume` first: it returns
+  where the last session stopped (the handoff) and the decisions and rules that
+  matter. `no_match` means there is nothing to resume: start fresh.
+- Before the session ends, or when the user asks to checkpoint, call
+  `handoff_save` with a summary, decisions, progress, open questions and next
+  actions. It replaces the project's previous handoff; durable decisions still
+  go through `memory_write`.
 
 When to search
 - At the start of a task on a project, before asking the human questions.
@@ -38,6 +47,7 @@ TOOL_DESCRIPTIONS = {
     "memory_search": (
         "Searches the shared memory (hybrid: keywords + semantic). "
         "Call it at the start of a task and before any technical decision. "
+        "Handoffs are left out unless `type` is `handoff`. "
         "Returns `status: no_match` when nothing relevant exists."
     ),
     "memory_get": "Fetches a full memory by its identifier, with its provenance.",
@@ -54,4 +64,16 @@ TOOL_DESCRIPTIONS = {
         "the new one points to it."
     ),
     "memory_history": "Git history of a memory: who wrote or changed it, and when.",
+    "handoff_save": (
+        "Saves where this session stopped, for the next session or agent to resume. "
+        "Call it before ending a session or when asked to checkpoint. Give structured "
+        "fields (lists of short items); the server writes the Markdown. It supersedes "
+        "the project's previous handoff. `sources` are ids of memories it relies on."
+    ),
+    "context_resume": (
+        "Call at the start of a session: returns the latest active handoff(s) for the "
+        "project and the most relevant active decisions and rules, with provenance. "
+        "Returns `status: no_match` when there is nothing to resume. Output is capped "
+        "at `max_chars` characters of content."
+    ),
 }
