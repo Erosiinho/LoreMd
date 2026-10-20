@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TypeVar
 
 import typer
 from rich.console import Console
@@ -17,8 +16,6 @@ from ..errors import LoremdError
 console = Console()
 error_console = Console(stderr=True, style="bold red")
 
-T = TypeVar("T")
-
 #: Set by the application's main callback.
 CONFIG_PATH: Path | None = None
 
@@ -27,7 +24,7 @@ def settings() -> Settings:
     return load_settings(CONFIG_PATH)
 
 
-def run_with_core(
+def run_with_core[T](
     operation: Callable[[Loremd], Awaitable[T]], *, migrate: bool = True
 ) -> T:
     """Starts the core, runs the operation, and translates domain errors."""
