@@ -29,6 +29,12 @@ _LOG_FORMAT = "%H%x1f%an%x1f%ae%x1f%aI%x1f%s"
 #: Fallback identity when a caller passes an empty name or email.
 FALLBACK_IDENTITY = ("loremd", "loremd@localhost")
 
+#: A server has nobody to type a password: fail fast instead of hanging.
+NETWORK_ENV = {
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", "ssh -o BatchMode=yes"),
+}
+
 
 def identity_env(author_name: str, author_email: str) -> dict[str, str]:
     """Environment forcing who signs a commit.
@@ -58,15 +64,33 @@ class GitRepo:
 
     # -- plumbing ------------------------------------------------------------
 
-    def run(self, *args: str, check: bool = True, env: dict[str, str] | None = None) -> str:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=self.path,
-            capture_output=True,
-            text=True,
-            check=False,
-            env={**os.environ, **env} if env else None,
-        )
+    def _exec(
+        self,
+        *args: str,
+        env: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                ["git", *args],
+                cwd=self.path,
+                capture_output=True,
+                text=True,
+                check=False,
+                env={**os.environ, **env} if env else None,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GitError(f"git {' '.join(args)} timed out after {timeout}s") from exc
+
+    def run(
+        self,
+        *args: str,
+        check: bool = True,
+        env: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        result = self._exec(*args, env=env, timeout=timeout)
         if check and result.returncode != 0:
             raise GitError(
                 f"git {' '.join(args)} failed ({result.returncode}): "
@@ -91,10 +115,45 @@ class GitRepo:
             text=True,
             check=True,
         )
+        self._configure()
+
+    def _configure(self) -> None:
         # Commits carry the agent's name; these values are only a fallback for
         # when an external git tool writes to the repository.
         self.run("config", "user.name", "LoreMd")
         self.run("config", "user.email", "loremd@localhost")
+
+    def clone(self, url: str, *, timeout: float | None = None) -> None:
+        """Clones an existing remote into this (absent or empty) directory.
+
+        A company that already keeps its memory in a repository gets it as is;
+        an empty remote yields an empty repository on the default branch.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            ["git", "clone", url, str(self.path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, **NETWORK_ENV},
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            raise GitError(f"git clone {url} failed: {result.stderr.strip()}")
+        self._configure()
+        if self.head() is None:
+            self.run("symbolic-ref", "HEAD", f"refs/heads/{self.default_branch}")
+            return
+        if self.current_branch() != self.default_branch:
+            if not self.run("rev-parse", "--verify", "--quiet", self.remote_ref(), check=False):
+                raise GitError(
+                    f"the remote has no {self.default_branch} branch: set "
+                    "spaces.default_branch to the branch it uses"
+                )
+            self.run("checkout", self.default_branch)
+
+    def current_branch(self) -> str:
+        return self.run("symbolic-ref", "--short", "HEAD", check=False)
 
     def set_remote(self, url: str, name: str = "origin") -> None:
         existing = self.run("remote", check=False)
@@ -121,7 +180,8 @@ class GitRepo:
         return self.head()
 
     def head(self) -> str | None:
-        sha = self.run("rev-parse", "HEAD", check=False)
+        # Plain `rev-parse HEAD` echoes "HEAD" on a branch with no commit yet.
+        sha = self.run("rev-parse", "--verify", "--quiet", "HEAD", check=False)
         return sha or None
 
     def has_commit(self, sha: str) -> bool:
@@ -185,13 +245,95 @@ class GitRepo:
         content = self.run("show", f"{revision}:{relative_path}", check=False)
         return content or None
 
-    # -- synchronization (phase 2) -------------------------------------------
-
-    def pull_rebase(self, remote: str = "origin") -> None:
-        self.run("pull", "--rebase", remote, self.default_branch)
-
-    def push(self, remote: str = "origin") -> None:
-        self.run("push", remote, self.default_branch)
+    # -- synchronization ----------------------------------------------------
 
     def has_remote(self, name: str = "origin") -> bool:
         return name in self.run("remote", check=False).split()
+
+    def remote_ref(self, remote: str = "origin") -> str:
+        return f"refs/remotes/{remote}/{self.default_branch}"
+
+    def fetch(self, remote: str = "origin", *, timeout: float | None = None) -> bool:
+        """Updates the remote-tracking branch. False when the remote branch does not exist yet."""
+        branch = self.default_branch
+        result = self._exec(
+            "fetch",
+            remote,
+            f"+refs/heads/{branch}:{self.remote_ref(remote)}",
+            env=NETWORK_ENV,
+            timeout=timeout,
+        )
+        if result.returncode == 0:
+            return True
+        if "couldn't find remote ref" in result.stderr.lower():
+            return False  # an empty remote, waiting for its first push
+        raise GitError(f"git fetch {remote} failed: {result.stderr.strip()}")
+
+    def ahead_behind(self, ref: str) -> tuple[int, int]:
+        """Commits only on HEAD, and only on `ref`."""
+        if self.head() is None:
+            behind = self.run("rev-list", "--count", ref, check=False)
+            return 0, int(behind or 0)
+        output = self.run("rev-list", "--left-right", "--count", f"HEAD...{ref}")
+        ahead, behind = output.split()
+        return int(ahead), int(behind)
+
+    def fast_forward(self, ref: str) -> None:
+        if self.head() is None:
+            # Nothing local yet: take the remote branch as is.
+            self.run("reset", "--hard", ref)
+            return
+        self.run("merge", "--ff-only", ref)
+
+    def rebase(self, ref: str, *, env: dict[str, str] | None = None) -> bool:
+        """Replays local commits on top of `ref`. On conflict, aborts and returns False."""
+        result = self._exec("rebase", ref, env=env)
+        if result.returncode == 0:
+            return True
+        self._exec("rebase", "--abort")
+        return False
+
+    def merge_no_commit(self, ref: str, *, env: dict[str, str] | None = None) -> bool:
+        """Starts a merge without committing it. False when paths are left in conflict."""
+        result = self._exec(
+            "merge", "--no-ff", "--no-commit", "--allow-unrelated-histories", ref, env=env
+        )
+        if result.returncode == 0:
+            return True
+        if self.unmerged_paths():
+            return False
+        self._exec("merge", "--abort")
+        raise GitError(f"git merge {ref} failed: {result.stderr.strip() or result.stdout.strip()}")
+
+    def abort_merge(self) -> None:
+        self._exec("merge", "--abort")
+
+    def unmerged_paths(self) -> list[str]:
+        output = self.run("diff", "--name-only", "--diff-filter=U", check=False)
+        return sorted({line for line in output.splitlines() if line})
+
+    def stage_content(self, relative_path: str, stage: int) -> str | None:
+        """A conflicted file as one side has it: 2 = ours (local), 3 = theirs (remote)."""
+        result = self._exec("show", f":{stage}:{relative_path}")
+        return result.stdout if result.returncode == 0 else None
+
+    def stage(self, paths: list[str]) -> None:
+        """Marks paths as resolved, including the ones that were deleted."""
+        if paths:
+            self.run("add", "--all", "--", *paths)
+
+    def commit_staged(self, message: str, *, author_name: str, author_email: str) -> str | None:
+        """Commits what is already staged (a merge, typically)."""
+        self.run(
+            "commit", "--no-edit", "-m", message, env=identity_env(author_name, author_email)
+        )
+        return self.head()
+
+    def push(self, remote: str = "origin", *, timeout: float | None = None) -> None:
+        self.run(
+            "push",
+            remote,
+            f"HEAD:refs/heads/{self.default_branch}",
+            env=NETWORK_ENV,
+            timeout=timeout,
+        )
