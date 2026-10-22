@@ -39,3 +39,12 @@ def test_environment_has_the_last_word(tmp_path: Path, monkeypatch) -> None:
 def test_missing_explicit_path_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(ConfigError):
         load_settings(tmp_path / "missing.yaml")
+
+
+def test_an_empty_variable_does_not_erase_the_file(tmp_path: Path, monkeypatch) -> None:
+    # docker-compose turns an unset `${VAR:-}` into an empty string.
+    config = tmp_path / "config.yaml"
+    config.write_text("sync:\n  webhook_secret: from-the-file\n", encoding="utf-8")
+    monkeypatch.setenv("LOREMD_SYNC__WEBHOOK_SECRET", "")
+
+    assert load_settings(config).sync.webhook_secret == "from-the-file"

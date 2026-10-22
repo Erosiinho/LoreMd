@@ -60,7 +60,30 @@ class WriteConfig(BaseModel):
 
 class GitConfig(BaseModel):
     author_email_domain: str = "agents.loremd.local"
-    auto_push: bool = False
+    # Push to the remote in the background after each commit.
+    auto_push: bool = True
+    # Network operations (fetch, push, clone) give up after this long.
+    timeout_seconds: int = 60
+
+
+class SyncConfig(BaseModel):
+    """Two-way sync with each space's remote."""
+
+    # Periodic pull and reindex of every space. 0 disables the watcher.
+    interval_seconds: int = 60
+    # Commits made within this window are pushed together.
+    push_debounce_seconds: float = 2.0
+    # Shared secret of the `/hooks/git/<space>` webhook. Unset disables it.
+    webhook_secret: str | None = None
+
+
+class ConsoleConfig(BaseModel):
+    """Admin console under /admin."""
+
+    enabled: bool = True
+    session_hours: int = 12
+    # Login attempts per minute and per IP address.
+    login_attempts_per_minute: int = 10
 
 
 class AuditConfig(BaseModel):
@@ -80,6 +103,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LOREMD_",
         env_nested_delimiter="__",
+        # docker-compose passes unset variables as empty strings: they must not
+        # erase a value set in config.yaml.
+        env_ignore_empty=True,
         extra="ignore",
     )
 
@@ -90,6 +116,8 @@ class Settings(BaseSettings):
     search: SearchConfig = Field(default_factory=SearchConfig)
     write: WriteConfig = Field(default_factory=WriteConfig)
     git: GitConfig = Field(default_factory=GitConfig)
+    sync: SyncConfig = Field(default_factory=SyncConfig)
+    console: ConsoleConfig = Field(default_factory=ConsoleConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
 

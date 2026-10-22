@@ -46,7 +46,9 @@ async def settings(tmp_path: Path) -> Settings:
         # so the thresholds have to be read as "nearly the same text".
         search={"min_similarity": 0.5, "default_limit": 8, "max_limit": 50},
         write={"max_bytes": 4096, "dedup_threshold": 0.95, "detect_secrets": True},
-        git={"author_email_domain": "agents.test", "auto_push": False},
+        git={"author_email_domain": "agents.test", "auto_push": False, "timeout_seconds": 30},
+        # Syncs run when a test asks for them, not on a timer.
+        sync={"interval_seconds": 0, "push_debounce_seconds": 0},
         limits={"requests_per_minute": 0, "burst": 0},
     )
 

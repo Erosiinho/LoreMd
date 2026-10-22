@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 
+from ..auth.admins import AdminService
 from ..auth.authenticator import Authenticator
 from ..auth.ratelimit import RateLimiter
 from ..config import Settings, get_settings
@@ -17,14 +18,16 @@ from ..errors import ConfigError
 from .audit import AuditService
 from .indexer import Indexer
 from .memories import MemoryService
+from .review import ReviewService
 from .search import SearchService
 from .spaces import SpaceService
+from .sync import SyncService
 
 logger = logging.getLogger(__name__)
 
 
 class Loremd:
-    """Core entry point: spaces, memories, search, index, audit."""
+    """Core entry point: spaces, memories, search, index, sync, review, audit."""
 
     def __init__(
         self,
@@ -44,8 +47,18 @@ class Loremd:
         self.audit = AuditService(self.db, self.settings)
         self.spaces = SpaceService(self.db, self.settings)
         self.indexer = Indexer(self.db, self.spaces, self.embeddings, self.settings)
+        self.sync = SyncService(self.db, self.spaces, self.indexer, self.audit, self.settings)
         self.memories = MemoryService(
-            self.db, self.spaces, self.indexer, self.embeddings, self.audit, self.settings
+            self.db,
+            self.spaces,
+            self.indexer,
+            self.embeddings,
+            self.audit,
+            self.settings,
+            sync=self.sync,
+        )
+        self.review = ReviewService(
+            self.db, self.spaces, self.indexer, self.memories, self.audit
         )
         self.search = SearchService(
             self.db, self.spaces, self.embeddings, self.audit, self.settings
@@ -55,6 +68,7 @@ class Loremd:
             burst=self.settings.limits.burst,
         )
         self.auth = Authenticator(self.db, self.settings.bootstrap_token, self.limiter)
+        self.admins = AdminService(self.db, self.settings)
 
     async def start(self, *, migrate: bool = True) -> None:
         self.settings.spaces.root.mkdir(parents=True, exist_ok=True)
@@ -72,6 +86,8 @@ class Loremd:
         await self._check_embedding_dimensions()
 
     async def stop(self) -> None:
+        # Pending pushes first: they still need the database to record the sync.
+        await self.sync.stop()
         await self.db.close()
 
     async def _check_embedding_dimensions(self) -> None:

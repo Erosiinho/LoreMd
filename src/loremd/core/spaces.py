@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ from ..db import Database
 from ..db.repositories import SpaceRepository
 from ..errors import NotFound, ValidationError
 from .git import GitRepo
+from .locks import space_lock
 from .models import MEMORY_DIRECTORIES, Space
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
@@ -79,12 +81,20 @@ class SpaceService:
         *,
         description: str | None = None,
         remote_url: str | None = None,
-        review_required: bool = False,
+        review_required: bool | None = None,
     ) -> Space:
-        """Creates the repository, the directory tree and the index row. Idempotent."""
+        """Creates the repository, the directory tree and the index row. Idempotent.
+
+        With a remote, an existing repository is cloned rather than started
+        afresh, and its `.loremd/space.yaml` wins over unset options.
+        """
         validate_slug(slug)
         path = self.path_for(slug)
         repo = GitRepo(path, default_branch=self._settings.spaces.default_branch)
+        if remote_url and not repo.exists:
+            await asyncio.to_thread(
+                repo.clone, remote_url, timeout=self._settings.git.timeout_seconds
+            )
         repo.init()
 
         for directory in MEMORY_DIRECTORIES:
@@ -97,6 +107,11 @@ class SpaceService:
         if not readme.exists():
             readme.write_text(_README.format(slug=slug), encoding="utf-8")
 
+        existing = self.read_space_config(path)
+        if description is None:
+            description = existing.get("description")
+        if review_required is None:
+            review_required = bool(existing.get("review_required", False))
         self.write_space_config(
             path, description=description, review_required=review_required
         )
@@ -123,6 +138,39 @@ class SpaceService:
             )
         return space
 
+    async def set_review_required(
+        self, space: Space, review_required: bool, *, author_name: str, author_email: str
+    ) -> Space:
+        """Turns review on or off: a commit to `space.yaml`, mirrored in the index."""
+        path = Path(space.path)
+        async with space_lock(space.slug, path):
+            config = self.read_space_config(path)
+            self.write_space_config(
+                path, description=config.get("description"), review_required=review_required
+            )
+            self.repo_for(space).commit(
+                [f"{CONFIG_DIRNAME}/{CONFIG_FILENAME}"],
+                f"chore: review {'required' if review_required else 'not required'}",
+                author_name=author_name,
+                author_email=author_email,
+            )
+        return await self.refresh_config(space)
+
+    async def refresh_config(self, space: Space) -> Space:
+        """Copies `.loremd/space.yaml` into the index row when a human changed it."""
+        config = self.read_space_config(Path(space.path))
+        description = config.get("description", space.description)
+        review_required = bool(config.get("review_required", space.review_required))
+        if (description, review_required) != (space.description, space.review_required):
+            async with self._db.acquire() as connection:
+                await SpaceRepository(connection).set_config(
+                    space.id, description=description, review_required=review_required
+                )
+            space = space.model_copy(
+                update={"description": description, "review_required": review_required}
+            )
+        return space
+
     def write_space_config(
         self, path: Path, *, description: str | None, review_required: bool
     ) -> None:
@@ -142,7 +190,12 @@ class SpaceService:
         config_path = path / CONFIG_DIRNAME / CONFIG_FILENAME
         if not config_path.exists():
             return {}
-        return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        try:
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            # A human typo must not take the space down: keep the last good values.
+            return {}
+        return config if isinstance(config, dict) else {}
 
     async def get(self, slug: str) -> Space:
         async with self._db.acquire() as connection:
