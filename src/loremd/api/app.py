@@ -1,4 +1,5 @@
-"""ASGI application: health, info, and the MCP server under /mcp."""
+"""ASGI application: health, the MCP server under /mcp, the admin console under
+/admin and the git webhook under /hooks."""
 
 from __future__ import annotations
 
@@ -11,7 +12,9 @@ from fastapi import FastAPI
 from .. import __version__
 from ..config import Settings, get_settings
 from ..core.service import Loremd
+from .console import build_console_router
 from .context import CallContextMiddleware
+from .hooks import build_hooks_router
 from .mcp_server import build_mcp
 
 logger = logging.getLogger(__name__)
@@ -32,6 +35,8 @@ def create_app(settings: Settings | None = None, *, core: Loremd | None = None) 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await service.start()
+        # Periodic pull and reindex: picks up what humans push, webhook or not.
+        service.sync.start_watcher()
         logger.info("LoreMd %s ready — MCP at %s", __version__, MCP_MOUNT_PATH)
         # The MCP session manager has its own lifecycle: mounting it is not
         # enough, it has to be running.
@@ -68,6 +73,13 @@ def create_app(settings: Settings | None = None, *, core: Loremd | None = None) 
             "mcp_endpoint": f"{settings.server.public_url.rstrip('/')}{MCP_MOUNT_PATH}",
             "transport": "streamable-http",
         }
+
+    # Routes take priority over the catch-all mount below, which turns away
+    # anything without a bearer token: the console and the webhook have their
+    # own authentication.
+    app.include_router(build_hooks_router(service))
+    if settings.console.enabled:
+        app.include_router(build_console_router(service))
 
     # Registered last: the routes above keep their priority.
     app.mount("/", CallContextMiddleware(mcp.streamable_http_app()))
