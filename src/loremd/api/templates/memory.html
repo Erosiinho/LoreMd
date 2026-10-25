@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, provenance %}
+{% block title %}{{ memory.title }}{% endblock %}
+{% block content %}
+<h1>{{ memory.title }}</h1>
+<p>
+  <span class="status status-{{ memory.status.value }}">{{ memory.status.value }}</span>
+  {% if memory.verified %}<span class="status status-verified">verified</span>{% endif %}
+  <code>{{ memory.id }}</code>
+</p>
+{{ provenance(memory) }}
+{% if memory.tags %}<p class="tags">{% for tag in memory.tags %}<span>{{ tag }}</span>{% endfor %}</p>{% endif %}
+<pre class="content">{{ memory.content }}</pre>
+<div class="actions">
+  {% if memory.status.value == "pending" %}
+  <form method="post" action="{{ prefix }}/memories/{{ memory.id | urlencode }}/approve">
+    {{ csrf(session) }}<button type="submit">Approve</button>
+  </form>
+  <form method="post" action="{{ prefix }}/memories/{{ memory.id | urlencode }}/reject">
+    {{ csrf(session) }}<input type="text" name="reason" placeholder="Reason (optional)">
+    <button type="submit" class="danger">Reject</button>
+  </form>
+  {% elif memory.status.value == "conflict" %}
+  <a class="button" href="{{ prefix }}/conflicts/{{ memory.id | urlencode }}">Resolve the conflict</a>
+  {% else %}
+  <form method="post" action="{{ prefix }}/memories/{{ memory.id | urlencode }}/verify">
+    {{ csrf(session) }}
+    <input type="hidden" name="verified" value="{{ '0' if memory.verified else '1' }}">
+    <button type="submit">{{ "Remove the verified flag" if memory.verified else "Mark as verified" }}</button>
+  </form>
+  {% endif %}
+</div>
+<h2>History</h2>
+<table>
+  <thead><tr><th>date</th><th>author</th><th>commit</th><th>message</th></tr></thead>
+  <tbody>
+  {% for commit in history %}
+    <tr><td>{{ commit.date.isoformat(timespec="minutes") }}</td><td>{{ commit.author }}</td><td><code>{{ commit.sha[:10] }}</code></td><td>{{ commit.message }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

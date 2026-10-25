@@ -1,0 +1,12 @@
+{% macro csrf(session) %}<input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">{% endmacro %}
+
+{% macro provenance(memory) -%}
+<dl class="provenance">
+  <dt>space</dt><dd>{{ memory.space }}</dd>
+  <dt>file</dt><dd><code>{{ memory.path }}</code></dd>
+  <dt>type</dt><dd>{{ memory.type.value }}</dd>
+  <dt>author</dt><dd>{{ memory.author or "—" }}</dd>
+  <dt>source</dt><dd>{{ memory.source or "—" }}</dd>
+  <dt>updated</dt><dd>{{ memory.updated.isoformat(timespec="minutes") }}</dd>
+</dl>
+{%- endmacro %}

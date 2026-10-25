@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Conflicts{% endblock %}
+{% block content %}
+<h1>Conflicts</h1>
+<p class="hint">A conflict appears when a human and an agent changed the same memory before a sync. Both versions are kept until someone picks.</p>
+{% if not conflicts %}
+<p>No conflict.</p>
+{% else %}
+<table>
+  <thead><tr><th>memory</th><th>space</th><th>versions</th><th>updated</th></tr></thead>
+  <tbody>
+  {% for view in conflicts %}
+    <tr>
+      <td><a href="{{ prefix }}/conflicts/{{ view.id | urlencode }}">{{ view.memory.frontmatter.title }}</a><br><small><code>{{ view.memory.path }}</code></small></td>
+      <td>{{ view.space }}</td>
+      <td>{{ "2" if view.copy else "1" }}</td>
+      <td>{{ view.memory.frontmatter.updated.isoformat(timespec="minutes") }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

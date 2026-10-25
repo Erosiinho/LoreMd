@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}Conflict · {{ view.memory.frontmatter.title }}{% endblock %}
+{% block content %}
+<h1>Conflict: {{ view.memory.frontmatter.title }}</h1>
+<p class="hint">Space <strong>{{ view.space }}</strong>. Whatever you choose ends up at <code>{{ view.memory.path }}</code>, active and verified, in a commit signed with your email. Git keeps every version.</p>
+<div class="versions">
+  {% for label, version in [("memory", view.memory), ("copy", view.copy)] if version %}
+  <section class="version">
+    <h2>{{ "Remote version (humans)" if label == "memory" else "Server version (agents)" }}</h2>
+    <dl class="provenance">
+      <dt>title</dt><dd>{{ version.frontmatter.title }}</dd>
+      <dt>author</dt><dd>{{ version.frontmatter.author or "—" }}</dd>
+      <dt>file</dt><dd><code>{{ version.path }}</code></dd>
+      <dt>tags</dt><dd>{{ version.frontmatter.tags | join(", ") or "—" }}</dd>
+    </dl>
+    <pre class="content">{{ version.content }}</pre>
+  </section>
+  {% endfor %}
+</div>
+<form class="resolve" method="post" action="{{ prefix }}/conflicts/{{ view.id | urlencode }}/resolve">
+  {{ csrf(session) }}
+  <fieldset>
+    <legend>Keep</legend>
+    <label><input type="radio" name="keep" value="memory" checked> the {{ "remote version" if view.copy else "memory as it is" }}</label>
+    {% if view.copy %}<label><input type="radio" name="keep" value="copy"> the server version</label>{% endif %}
+    <label><input type="radio" name="keep" value="discard"> neither: delete {{ "both files" if view.copy else "the file" }}</label>
+  </fieldset>
+  <label>Merged text (optional: replaces the body of the version you keep)
+    <textarea name="content" rows="8"></textarea>
+  </label>
+  <button type="submit">Resolve</button>
+</form>
+{% endblock %}

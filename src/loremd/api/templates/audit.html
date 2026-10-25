@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Audit{% endblock %}
+{% block content %}
+<h1>Audit log</h1>
+<form class="filter" method="get" action="{{ prefix }}/audit">
+  <label>Actor <input type="text" name="actor" value="{{ actor }}"></label>
+  <label>Action <input type="text" name="action" value="{{ action }}" placeholder="memory_write"></label>
+  <label>Limit <input type="number" name="limit" value="{{ limit }}" min="1" max="1000"></label>
+  <button type="submit" class="small">Filter</button>
+</form>
+<table>
+  <thead><tr><th>date</th><th>actor</th><th>action</th><th>target</th><th>space</th><th>ip</th></tr></thead>
+  <tbody>
+  {% for entry in entries %}
+    <tr>
+      <td>{{ entry["created_at"].isoformat(timespec="seconds") }}</td>
+      <td><a href="{{ prefix }}/audit?actor={{ entry['actor'] | urlencode }}">{{ entry["actor"] }}</a></td>
+      <td>{{ entry["action"] }}</td>
+      <td><small>{{ (entry["target"] or "—")[:80] }}</small></td>
+      <td>{{ entry["space"] or "—" }}</td>
+      <td>{{ entry["ip"] or "—" }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6">No entry.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
