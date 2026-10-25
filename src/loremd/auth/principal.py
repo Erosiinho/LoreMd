@@ -20,7 +20,11 @@ class Principal:
     """An agent (or the administrator) behind a request.
 
     `space_ids = None` means "all spaces": reserved for the bootstrap token and
-    for administrative calls from the CLI.
+    for administrative calls from the CLI and the console.
+
+    `email` is the address commits are signed with; agents leave it unset and
+    get one derived from their name. `review_required` sends everything the
+    caller writes to the review queue, whatever the space says.
     """
 
     name: str
@@ -28,10 +32,19 @@ class Principal:
     space_ids: frozenset[UUID] | None
     token_prefix: str | None = None
     ip: str | None = None
+    email: str | None = None
+    review_required: bool = False
 
     @classmethod
-    def admin(cls, name: str = "cli") -> Principal:
-        return cls(name=name, scopes=frozenset(Scope), space_ids=None)
+    def admin(
+        cls, name: str = "cli", *, email: str | None = None, ip: str | None = None
+    ) -> Principal:
+        return cls(name=name, scopes=frozenset(Scope), space_ids=None, email=email, ip=ip)
+
+    @classmethod
+    def system(cls) -> Principal:
+        """LoreMd itself: sync merges, conflict copies."""
+        return cls(name="loremd", scopes=frozenset(Scope), space_ids=None)
 
     def has_scope(self, scope: Scope) -> bool:
         return scope in self.scopes or Scope.ADMIN in self.scopes

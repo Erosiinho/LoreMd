@@ -99,4 +99,5 @@ class Authenticator:
             space_ids=frozenset(row["space_ids"] or []),
             token_prefix=parts.prefix,
             ip=ip,
+            review_required=bool(row["agent_review_required"]),
         )
