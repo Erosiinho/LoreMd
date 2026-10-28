@@ -4,18 +4,29 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 from rich.panel import Panel
 from rich.table import Table
 
 from .. import __version__
+from ..auth import totp
+from ..auth.admins import Role
 from ..auth.principal import Principal, Scope
 from ..auth.tokens import generate_token
+from ..core.memories import commit_identity
 from ..core.models import MemoryType
+from ..core.review import Keep
 from ..core.service import Loremd
-from ..db.repositories import AgentRepository, AuditRepository, SpaceRepository, TokenRepository
+from ..core.sync import SyncReport
+from ..db.repositories import (
+    AdminRepository,
+    AgentRepository,
+    AuditRepository,
+    SpaceRepository,
+    TokenRepository,
+)
 from ..errors import NotFound
 from . import runtime
 from .runtime import console, run_with_core
@@ -28,9 +39,20 @@ app = typer.Typer(
 space_app = typer.Typer(name="space", help="Manage spaces (one space = one git repository).")
 agent_app = typer.Typer(name="agent", help="Manage agents.")
 token_app = typer.Typer(name="token", help="Manage access tokens.")
+review_app = typer.Typer(name="review", help="Work the review queue.")
+conflict_app = typer.Typer(name="conflict", help="Resolve sync conflicts.")
+admin_app = typer.Typer(name="admin", help="Manage admin console accounts.")
 app.add_typer(space_app)
 app.add_typer(agent_app)
 app.add_typer(token_app)
+app.add_typer(review_app)
+app.add_typer(conflict_app)
+app.add_typer(admin_app)
+
+#: Who signs the commits of review commands run from the CLI.
+AuthorOption = Annotated[
+    str, typer.Option("--author", help="Commit author, ideally your email.")
+]
 
 
 @app.callback()
@@ -76,20 +98,35 @@ def space_create(
     remote: Annotated[str | None, typer.Option(help="URL of the space's git remote.")] = None,
     description: Annotated[str | None, typer.Option(help="Short description.")] = None,
     review: Annotated[
-        bool, typer.Option("--review/--no-review", help="Require human review.")
-    ] = False,
+        bool | None,
+        typer.Option(
+            "--review/--no-review",
+            help="Require human review. Defaults to what the cloned space says, else no.",
+        ),
+    ] = None,
 ) -> None:
-    """Creates a space: git repository, directory tree and index entry."""
+    """Creates a space: git repository, directory tree and index entry.
+
+    With --remote, an existing repository is cloned and indexed, and the
+    initial commit is pushed.
+    """
 
     async def operation(core: Loremd):
-        return await core.spaces.create(
+        space = await core.spaces.create(
             slug, description=description, remote_url=remote, review_required=review
         )
+        indexed = await core.indexer.sync_space(space)
+        report = await core.sync.sync_space(space) if remote else None
+        return await core.spaces.get(slug), indexed, report
 
-    space = run_with_core(operation)
+    space, indexed, report = run_with_core(operation)
     console.print(f"[green]space created[/green] {space.slug} → {space.path}")
+    if indexed.indexed:
+        console.print(f"{indexed.indexed} existing memories indexed")
     if remote:
         console.print(f"remote: {remote}")
+    if report is not None:
+        _print_sync(report)
 
 
 @space_app.command("list")
@@ -138,30 +175,68 @@ def space_sync(
     slug: Annotated[
         str | None, typer.Argument(help="Space to sync; all of them by default.")
     ] = None,
-    pull: Annotated[bool, typer.Option("--pull/--no-pull", help="git pull --rebase first.")] = True,
-    push: Annotated[bool, typer.Option("--push/--no-push", help="git push afterwards.")] = False,
+    pull: Annotated[
+        bool, typer.Option("--pull/--no-pull", help="Fetch and integrate remote commits.")
+    ] = True,
+    push: Annotated[bool, typer.Option("--push/--no-push", help="Push local commits.")] = True,
 ) -> None:
-    """Fetches commits from the remote (human edits) and reindexes the diff."""
+    """Syncs with the remote: human edits come in, agent commits go out, the diff is reindexed."""
 
     async def operation(core: Loremd):
         spaces = [await core.spaces.get(slug)] if slug else await core.spaces.list()
-        reports = []
-        for space in spaces:
-            repo = core.spaces.repo_for(space)
-            if pull and repo.has_remote():
-                repo.pull_rebase()
-            reports.append(await core.indexer.sync_space(space))
-            if push and repo.has_remote():
-                repo.push()
-        return reports
+        return [await core.sync.sync_space(space, pull=pull, push=push) for space in spaces]
 
-    for report in run_with_core(operation):
+    reports = run_with_core(operation)
+    for report in reports:
+        _print_sync(report)
+    if any(report.error for report in reports):
+        raise typer.Exit(code=1)
+
+
+def _print_sync(report: SyncReport) -> None:
+    index = report.index
+    parts = []
+    if report.remote:
+        parts.append(f"{report.pulled} commit(s) pulled")
+        parts.append("pushed" if report.pushed else "nothing to push")
+    if index is not None:
+        parts.append(f"{index.indexed} indexed, {index.deleted} deleted")
+        if index.skipped:
+            parts.append(f"{index.skipped} skipped")
+    console.print(f"{report.space}: " + ", ".join(parts))
+    if report.conflicts:
         console.print(
-            f"{report.space}: {report.indexed} indexed, {report.deleted} deleted"
-            + (f", {report.skipped} skipped" if report.skipped else "")
+            f"  [yellow]{len(report.conflicts)} memory version(s) in conflict[/yellow] — "
+            "`loremd conflict list` or the console"
         )
-        for error in report.errors:
-            console.print(f"  [yellow]{error}[/yellow]")
+    for error in index.errors if index else []:
+        console.print(f"  [yellow]{error}[/yellow]")
+    if report.error:
+        console.print(f"  [red]{report.error}[/red]")
+
+
+@space_app.command("review")
+def space_review(
+    slug: str,
+    required: Annotated[
+        bool, typer.Option("--on/--off", help="Send every write to the review queue.")
+    ],
+    author: AuthorOption = "cli",
+) -> None:
+    """Turns review on or off for a space (committed to .loremd/space.yaml)."""
+
+    async def operation(core: Loremd):
+        space = await core.spaces.get(slug)
+        identity = commit_identity(
+            Principal.admin(author), core.settings.git.author_email_domain
+        )
+        updated = await core.spaces.set_review_required(space, required, **identity)
+        core.sync.request_push(updated)
+        return updated
+
+    space = run_with_core(operation)
+    state = "required" if space.review_required else "not required"
+    console.print(f"[green]{space.slug}[/green]: review {state}")
 
 
 # --------------------------------------------------------------------------- agents
@@ -180,13 +255,19 @@ def agent_create(
     expires_days: Annotated[
         int | None, typer.Option("--expires-days", help="Token expiry in days.")
     ] = None,
+    review: Annotated[
+        bool | None,
+        typer.Option("--review/--no-review", help="Send this agent's writes to review."),
+    ] = None,
 ) -> None:
     """Creates an agent and, if spaces are given, its first token."""
     scopes = parse_scopes(scope)
 
     async def operation(core: Loremd):
         async with core.db.acquire() as connection:
-            agent = await AgentRepository(connection).create(name, description)
+            agent = await AgentRepository(connection).create(
+                name, description, review_required=review
+            )
             if not space:
                 return agent, None, []
             spaces = []
@@ -223,15 +304,36 @@ def agent_list() -> None:
         async with core.db.acquire() as connection:
             return await AgentRepository(connection).list()
 
-    table = Table("agent", "description", "created", "state")
+    table = Table("agent", "description", "review", "created", "state")
     for row in run_with_core(operation):
         table.add_row(
             row["name"],
             row["description"] or "—",
+            "required" if row["review_required"] else "—",
             row["created_at"].date().isoformat(),
             "disabled" if row["disabled_at"] else "active",
         )
     console.print(table)
+
+
+@agent_app.command("review")
+def agent_review(
+    name: str,
+    required: Annotated[
+        bool, typer.Option("--on/--off", help="Send this agent's writes to review.")
+    ],
+) -> None:
+    """Turns review on or off for everything an agent writes, in every space."""
+
+    async def operation(core: Loremd):
+        async with core.db.acquire() as connection:
+            repository = AgentRepository(connection)
+            if await repository.get_by_name(name) is None:
+                raise NotFound(f"unknown agent: {name}")
+            await repository.set_review_required(name, required)
+
+    run_with_core(operation)
+    console.print(f"[green]{name}[/green]: review {'required' if required else 'not required'}")
 
 
 @agent_app.command("disable")
@@ -335,6 +437,214 @@ def token_revoke(prefix: str) -> None:
         console.print(f"[green]token revoked[/green] {prefix}")
     else:
         console.print(f"[yellow]no active token with prefix[/yellow] {prefix}")
+
+
+# --------------------------------------------------------------------------- review
+
+
+@review_app.command("list")
+def review_list(space: Annotated[str | None, typer.Option("--space")] = None) -> None:
+    """Lists the memories waiting for review, oldest first."""
+
+    async def operation(core: Loremd):
+        return await core.review.queue(Principal.admin(), space_slug=space)
+
+    memories = run_with_core(operation)
+    if not memories:
+        console.print("nothing waiting for review")
+        return
+    for memory in memories:
+        console.print(
+            f"[bold]{memory.id}[/bold]  {memory.title}  [dim]{memory.space}/{memory.path} "
+            f"· {memory.author or '—'} · {memory.updated.isoformat(timespec='minutes')}[/dim]"
+        )
+        console.print(f"  {memory.content.strip().splitlines()[0][:160]}\n", markup=False)
+
+
+@review_app.command("approve")
+def review_approve(memory_id: str, author: AuthorOption = "cli") -> None:
+    """Publishes a pending memory, marked verified."""
+
+    async def operation(core: Loremd):
+        return await core.review.approve(Principal.admin(author), memory_id)
+
+    memory = run_with_core(operation)
+    console.print(f"[green]approved[/green] {memory.id} — {memory.frontmatter.title}")
+
+
+@review_app.command("reject")
+def review_reject(
+    memory_id: str,
+    reason: Annotated[str, typer.Option("--reason", help="Becomes the commit message.")] = "",
+    author: AuthorOption = "cli",
+) -> None:
+    """Turns a pending memory down; the file stays with status rejected."""
+
+    async def operation(core: Loremd):
+        return await core.review.reject(Principal.admin(author), memory_id, reason)
+
+    memory = run_with_core(operation)
+    console.print(f"[yellow]rejected[/yellow] {memory.id} — {memory.frontmatter.title}")
+
+
+@review_app.command("verify")
+def review_verify(
+    memory_id: str,
+    undo: Annotated[bool, typer.Option("--undo", help="Remove the verified flag.")] = False,
+    author: AuthorOption = "cli",
+) -> None:
+    """Marks a memory as verified by a human (or no longer)."""
+
+    async def operation(core: Loremd):
+        return await core.review.set_verified(Principal.admin(author), memory_id, not undo)
+
+    memory = run_with_core(operation)
+    state = "verified" if memory.frontmatter.verified else "not verified"
+    console.print(f"[green]{memory.id}[/green] {state}")
+
+
+@conflict_app.command("list")
+def conflict_list(space: Annotated[str | None, typer.Option("--space")] = None) -> None:
+    """Lists conflicts left by a sync."""
+
+    async def operation(core: Loremd):
+        return await core.review.conflicts(Principal.admin(), space_slug=space)
+
+    views = run_with_core(operation)
+    if not views:
+        console.print("no conflict")
+        return
+    for view in views:
+        console.print(
+            f"[bold]{view.memory.id}[/bold]  {view.memory.frontmatter.title}  "
+            f"[dim]{view.space}/{view.memory.path}[/dim]"
+        )
+        if view.copy is not None:
+            console.print(f"  server version: {view.copy.id}  [dim]{view.copy.path}[/dim]")
+
+
+@conflict_app.command("resolve")
+def conflict_resolve(
+    memory_id: str,
+    keep: Annotated[
+        str,
+        typer.Option(
+            "--keep", help="memory (the remote version), copy (the server version) or discard."
+        ),
+    ],
+    author: AuthorOption = "cli",
+) -> None:
+    """Ends a conflict by keeping one version, or none."""
+    if keep not in ("memory", "copy", "discard"):
+        raise typer.BadParameter("--keep must be memory, copy or discard")
+
+    async def operation(core: Loremd):
+        return await core.review.resolve(
+            Principal.admin(author),
+            memory_id,
+            cast(Keep, keep),
+        )
+
+    kept = run_with_core(operation)
+    if kept is None:
+        console.print("[yellow]conflict resolved[/yellow]: both versions removed")
+    else:
+        console.print(f"[green]conflict resolved[/green]: {kept.id} is active again")
+
+
+# --------------------------------------------------------------------------- admins
+
+
+def _print_totp(email: str, secret: str) -> None:
+    console.print(
+        Panel(
+            f"secret: [bold]{secret}[/bold]\n\n"
+            f"{totp.provisioning_uri(secret, email)}\n\n"
+            "Add it to an authenticator app (paste the secret, or turn the URI into "
+            "a QR code). The console asks for a code from it at every login.",
+            title=f"TOTP for {email} — shown only once",
+            border_style="yellow",
+        )
+    )
+
+
+def _prompt_password() -> str:
+    return str(typer.prompt("password", hide_input=True, confirmation_prompt=True))
+
+
+@admin_app.command("create")
+def admin_create(
+    email: str,
+    role: Annotated[
+        str, typer.Option("--role", help="admin (everything) or reviewer (review only).")
+    ] = "admin",
+) -> None:
+    """Creates a console account: prompts for a password, prints the TOTP secret once."""
+    try:
+        chosen = Role(role)
+    except ValueError as error:
+        raise typer.BadParameter("--role must be admin or reviewer") from error
+    password = _prompt_password()
+
+    async def operation(core: Loremd):
+        return await core.admins.create(email, password, chosen)
+
+    created, secret = run_with_core(operation)
+    console.print(f"[green]admin created[/green] {created} ({chosen.value})")
+    _print_totp(created, secret)
+
+
+@admin_app.command("list")
+def admin_list() -> None:
+    """Lists console accounts."""
+
+    async def operation(core: Loremd):
+        async with core.db.acquire() as connection:
+            return await AdminRepository(connection).list()
+
+    table = Table("email", "role", "created", "last login", "state")
+    for row in run_with_core(operation):
+        table.add_row(
+            row["email"],
+            row["role"],
+            row["created_at"].date().isoformat(),
+            row["last_login_at"].isoformat(timespec="minutes") if row["last_login_at"] else "—",
+            "disabled" if row["disabled_at"] else "active",
+        )
+    console.print(table)
+
+
+@admin_app.command("disable")
+def admin_disable(email: str, enable: Annotated[bool, typer.Option("--enable")] = False) -> None:
+    """Disables a console account and ends its sessions (or re-enables it)."""
+
+    async def operation(core: Loremd):
+        await core.admins.set_disabled(email, not enable)
+
+    run_with_core(operation)
+    console.print(f"[green]{email}[/green] {'re-enabled' if enable else 'disabled'}")
+
+
+@admin_app.command("password")
+def admin_password(email: str) -> None:
+    """Sets a new password for a console account."""
+    password = _prompt_password()
+
+    async def operation(core: Loremd):
+        await core.admins.set_password(email, password)
+
+    run_with_core(operation)
+    console.print(f"[green]password changed[/green] for {email}")
+
+
+@admin_app.command("reset-totp")
+def admin_reset_totp(email: str) -> None:
+    """Issues a new TOTP secret, for a lost phone. The old codes stop working."""
+
+    async def operation(core: Loremd):
+        return await core.admins.reset_totp(email)
+
+    _print_totp(email, run_with_core(operation))
 
 
 # --------------------------------------------------------------------------- index
@@ -479,7 +789,7 @@ def serve(
 
 @app.command()
 def doctor() -> None:
-    """Checks the setup: git, database, pgvector, dimensions, spaces, tokens."""
+    """Checks the setup: git, database, pgvector, dimensions, spaces, tokens, admins."""
     import os
     import shutil
 
@@ -539,6 +849,23 @@ def doctor() -> None:
                 else "no token: `loremd agent create <name> --space <slug>`",
             )
         )
+        if core.settings.console.enabled:
+            async with core.db.acquire() as connection:
+                admins = await connection.fetchval(
+                    "SELECT count(*) FROM admins WHERE disabled_at IS NULL"
+                )
+            checks.append(
+                (
+                    "console admin",
+                    bool(admins),
+                    f"{admins} active admin(s)"
+                    if admins
+                    else "no admin: `loremd admin create <email>`",
+                )
+            )
+        for space in spaces:
+            if space.last_sync_error:
+                checks.append((f"sync \"{space.slug}\"", False, space.last_sync_error))
         if core.settings.bootstrap_token:
             checks.append(
                 (
