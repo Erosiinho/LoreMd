@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class MemoryType(StrEnum):
@@ -21,6 +21,8 @@ class MemoryType(StrEnum):
     RULE = "rule"
     FACT = "fact"
     NOTE = "note"
+    #: Where a work session stopped, for the next one to pick up.
+    HANDOFF = "handoff"
 
     @property
     def directory(self) -> str:
@@ -34,6 +36,7 @@ _TYPE_DIRECTORIES: dict[MemoryType, str] = {
     MemoryType.RULE: "rules",
     MemoryType.FACT: "facts",
     MemoryType.NOTE: "notes",
+    MemoryType.HANDOFF: "handoffs",
 }
 
 MEMORY_DIRECTORIES = tuple(_TYPE_DIRECTORIES.values())
@@ -49,6 +52,11 @@ class MemoryStatus(StrEnum):
 
 #: Statuses returned by search when the caller asks for nothing specific.
 SEARCHABLE_STATUSES = (MemoryStatus.ACTIVE,)
+
+#: Types returned by search when the caller asks for none: handoffs describe
+#: where a session stopped, not what is true, and come back through
+#: `context_resume` instead.
+SEARCHABLE_TYPES = tuple(t for t in MemoryType if t is not MemoryType.HANDOFF)
 
 
 class Frontmatter(BaseModel):
@@ -68,6 +76,8 @@ class Frontmatter(BaseModel):
     created: datetime
     updated: datetime
     supersedes: str | None = None
+    #: Memories a handoff relies on. Only written when set.
+    sources: list[str] | None = None
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -77,6 +87,29 @@ class Frontmatter(BaseModel):
         if isinstance(value, str):
             return [tag.strip() for tag in value.split(",") if tag.strip()]
         return [str(tag) for tag in value]
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def _coerce_sources(cls, value: Any) -> list[str] | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.split(",")
+        if not isinstance(value, list | tuple):
+            raise ValueError("sources must be a list of memory ids")
+        cleaned: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("sources must be a list of memory ids")
+            if item.strip() and item.strip() not in cleaned:
+                cleaned.append(item.strip())
+        return cleaned
+
+    @model_validator(mode="after")
+    def _sources_only_on_handoffs(self) -> Frontmatter:
+        if self.sources and self.type is not MemoryType.HANDOFF:
+            raise ValueError("sources are only allowed on a handoff")
+        return self
 
     @field_validator("title")
     @classmethod
@@ -147,6 +180,8 @@ class IndexedMemory(BaseModel):
     content: str
     created: datetime
     updated: datetime
+    supersedes: str | None = None
+    sources: list[str] = Field(default_factory=list)
 
 
 class SearchHit(BaseModel):

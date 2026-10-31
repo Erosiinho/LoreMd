@@ -32,6 +32,7 @@ is a commit.
 - `rules/` — constraints to follow
 - `facts/` — stable facts about the project
 - `notes/` — everything else
+- `handoffs/` — where each work session stopped, for the next one to resume
 
 This folder opens as is in Obsidian. Changes pushed to the remote are
 reindexed by LoreMd.

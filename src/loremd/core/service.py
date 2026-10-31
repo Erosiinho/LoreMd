@@ -16,6 +16,7 @@ from ..db import Database
 from ..embeddings import EmbeddingProvider, build_provider
 from ..errors import ConfigError
 from .audit import AuditService
+from .handoffs import HandoffService
 from .indexer import Indexer
 from .memories import MemoryService
 from .review import ReviewService
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class Loremd:
-    """Core entry point: spaces, memories, search, index, sync, review, audit."""
+    """Core entry point: spaces, memories, handoffs, search, index, sync, review, audit."""
 
     def __init__(
         self,
@@ -62,6 +63,9 @@ class Loremd:
         )
         self.search = SearchService(
             self.db, self.spaces, self.embeddings, self.audit, self.settings
+        )
+        self.handoffs = HandoffService(
+            self.db, self.spaces, self.memories, self.search, self.audit, self.settings
         )
         self.limiter = RateLimiter(
             requests_per_minute=self.settings.limits.requests_per_minute,

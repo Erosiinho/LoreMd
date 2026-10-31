@@ -27,7 +27,7 @@ from .vectors import to_literal
 _MEMORY_COLUMNS = """
     m.id, m.space_id, s.slug AS space, m.path, m.type, m.title, m.project,
     m.tags, m.status, m.verified, m.author, m.source, m.content,
-    m.created, m.updated
+    m.created, m.updated, m.supersedes, m.sources
 """
 
 
@@ -54,6 +54,8 @@ def _to_indexed(row: asyncpg.Record) -> IndexedMemory:
         content=row["content"],
         created=row["created"],
         updated=row["updated"],
+        supersedes=row["supersedes"],
+        sources=list(row["sources"] or []),
     )
 
 
@@ -160,10 +162,10 @@ class MemoryIndexRepository:
             INSERT INTO memory_index (
                 id, space_id, path, type, title, project, tags, status, verified,
                 author, source, supersedes, content, content_hash, embedding, tsv,
-                created, updated, indexed_at
+                created, updated, sources, indexed_at
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                    $15::vector, to_tsvector('simple', $16), $17, $18, now())
+                    $15::vector, to_tsvector('simple', $16), $17, $18, $19, now())
             ON CONFLICT (id) DO UPDATE SET
                 space_id = EXCLUDED.space_id,
                 path = EXCLUDED.path,
@@ -182,6 +184,7 @@ class MemoryIndexRepository:
                 tsv = EXCLUDED.tsv,
                 created = EXCLUDED.created,
                 updated = EXCLUDED.updated,
+                sources = EXCLUDED.sources,
                 indexed_at = now()
             """,
             fm.id,
@@ -202,6 +205,7 @@ class MemoryIndexRepository:
             f"{fm.title}\n{' '.join(fm.tags)}\n{memory.content}",
             fm.created,
             fm.updated,
+            fm.sources or [],
         )
 
     async def get(self, memory_id: str, space_ids: Sequence[UUID]) -> IndexedMemory | None:
@@ -273,12 +277,51 @@ class MemoryIndexRepository:
         )
         return {(row["space_id"], row["status"]): int(row["n"]) for row in rows}
 
+    async def latest_per_project(
+        self,
+        space_ids: Sequence[UUID],
+        memory_type: str,
+        *,
+        project: str | None = None,
+        any_project: bool = False,
+        statuses: Sequence[MemoryStatus] = (MemoryStatus.ACTIVE,),
+        limit: int = 5,
+    ) -> list[IndexedMemory]:
+        """The most recently updated memory of a type for each project, newest first.
+
+        `project=None` means "no project" unless `any_project` is set: a
+        handoff thread without a project is a thread of its own.
+        """
+        rows = await self.c.fetch(
+            f"""
+            SELECT * FROM (
+                SELECT DISTINCT ON (m.space_id, m.project) {_MEMORY_COLUMNS}
+                FROM memory_index m JOIN spaces s ON s.id = m.space_id
+                WHERE m.space_id = ANY($1::uuid[])
+                  AND m.type = $2
+                  AND m.status = ANY($3::text[])
+                  AND ($4 OR m.project IS NOT DISTINCT FROM $5::text)
+                ORDER BY m.space_id, m.project, m.updated DESC, m.id DESC
+            ) latest
+            ORDER BY latest.updated DESC, latest.id DESC
+            LIMIT $6
+            """,
+            list(space_ids),
+            memory_type,
+            [status.value for status in statuses],
+            any_project,
+            project,
+            limit,
+        )
+        return [_to_indexed(row) for row in rows]
+
     async def nearest(
         self,
         embedding: Sequence[float],
         space_id: UUID,
         *,
         statuses: Sequence[MemoryStatus] = (MemoryStatus.ACTIVE, MemoryStatus.PENDING),
+        memory_types: Sequence[str] | None = None,
         limit: int = 1,
     ) -> list[tuple[IndexedMemory, float]]:
         """Nearest neighbours within a space, with their cosine similarity."""
@@ -289,6 +332,7 @@ class MemoryIndexRepository:
             WHERE m.space_id = $2
               AND m.status = ANY($3::text[])
               AND m.embedding IS NOT NULL
+              AND ($5::text[] IS NULL OR m.type = ANY($5::text[]))
             ORDER BY m.embedding <=> $1::vector
             LIMIT $4
             """,
@@ -296,6 +340,7 @@ class MemoryIndexRepository:
             space_id,
             [status.value for status in statuses],
             limit,
+            list(memory_types) if memory_types is not None else None,
         )
         return [(_to_indexed(row), float(row["similarity"])) for row in rows]
 
@@ -307,12 +352,17 @@ class MemoryIndexRepository:
         space_ids: Sequence[UUID],
         statuses: Sequence[MemoryStatus],
         project: str | None = None,
-        memory_type: str | None = None,
+        memory_types: Sequence[str] | None = None,
+        include_unscoped: bool = False,
         limit: int = 8,
         rrf_k: int = 60,
         candidate_pool: int = 50,
     ) -> list[SearchHit]:
-        """Hybrid search: full-text and vector results merged with RRF."""
+        """Hybrid search: full-text and vector results merged with RRF.
+
+        With `include_unscoped`, a project filter also lets through the
+        memories that belong to no project (space-wide rules, for instance).
+        """
         rows = await self.c.fetch(
             f"""
             WITH filtered AS (
@@ -320,8 +370,9 @@ class MemoryIndexRepository:
                 FROM memory_index m
                 WHERE m.space_id = ANY($3::uuid[])
                   AND m.status = ANY($4::text[])
-                  AND ($5::text IS NULL OR m.project = $5)
-                  AND ($6::text IS NULL OR m.type = $6)
+                  AND ($5::text IS NULL OR m.project = $5
+                       OR ($10::boolean AND m.project IS NULL))
+                  AND ($6::text[] IS NULL OR m.type = ANY($6::text[]))
             ),
             text_hits AS (
                 SELECT id, row_number() OVER (ORDER BY rank_score DESC, updated DESC) AS rank
@@ -366,10 +417,11 @@ class MemoryIndexRepository:
             list(space_ids),
             [status.value for status in statuses],
             project,
-            memory_type,
+            list(memory_types) if memory_types is not None else None,
             candidate_pool,
             rrf_k,
             limit,
+            include_unscoped,
         )
         return [
             SearchHit(

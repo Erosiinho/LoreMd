@@ -33,7 +33,12 @@ KEY_ORDER = (
     "created",
     "updated",
     "supersedes",
+    "sources",
 )
+
+#: Keys left out of the file when unset or empty, so memories without them keep the
+#: header they always had.
+OMITTED_WHEN_UNSET = frozenset({"sources"})
 
 
 def split_document(text: str) -> tuple[dict[str, Any], str]:
@@ -87,6 +92,9 @@ def _serialize(value: Any) -> Any:
 def render(memory: Memory) -> str:
     """Renders the memory in file format."""
     dumped = memory.frontmatter.model_dump()
+    for key in OMITTED_WHEN_UNSET:
+        if not dumped.get(key):
+            dumped.pop(key, None)
     ordered: dict[str, Any] = {}
     for key in KEY_ORDER:
         if key in dumped:
