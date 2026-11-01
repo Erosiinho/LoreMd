@@ -1,6 +1,6 @@
 """MCP server: a thin layer on top of the core.
 
-Seven tools, no more: agents follow a small set of well-described tools better.
+Nine tools, no more: agents follow a small set of well-described tools better.
 Every call re-authenticates the token and re-filters spaces.
 """
 
@@ -21,11 +21,15 @@ from .serializers import (
     commit_to_dict,
     hit_to_dict,
     memory_to_dict,
+    resume_to_dict,
     space_to_dict,
     write_result_to_dict,
 )
 
 logger = logging.getLogger(__name__)
+
+#: Types `memory_write` accepts: handoffs go through `handoff_save`.
+WRITABLE_TYPES = tuple(t for t in MemoryType if t is not MemoryType.HANDOFF)
 
 
 class ToolFailure(Exception):
@@ -122,8 +126,12 @@ def build_mcp(core: Loremd) -> FastMCP:
         except ValueError as error:
             raise ToolFailure(
                 f"unknown type: {type}. Allowed values: "
-                + ", ".join(t.value for t in MemoryType)
+                + ", ".join(t.value for t in WRITABLE_TYPES)
             ) from error
+        if memory_type is MemoryType.HANDOFF:
+            raise ToolFailure(
+                "a handoff is written with handoff_save, which renders its sections"
+            )
         try:
             who = await principal()
             result = await core.memories.write(
@@ -166,5 +174,61 @@ def build_mcp(core: Loremd) -> FastMCP:
         except LoremdError as error:
             raise _fail(error) from error
         return {"id": id, "commits": [commit_to_dict(commit) for commit in commits]}
+
+    @mcp.tool(description=TOOL_DESCRIPTIONS["handoff_save"])
+    async def handoff_save(
+        space: str,
+        title: str,
+        summary: str,
+        decisions: list[str] | str | None = None,
+        progress: list[str] | str | None = None,
+        open_questions: list[str] | str | None = None,
+        next_actions: list[str] | str | None = None,
+        project: str | None = None,
+        sources: list[str] | None = None,
+        supersedes: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            who = await principal()
+            result = await core.handoffs.save(
+                who,
+                space_slug=space,
+                title=title,
+                summary=summary,
+                decisions=decisions,
+                progress=progress,
+                open_questions=open_questions,
+                next_actions=next_actions,
+                project=project,
+                sources=sources,
+                supersedes=supersedes,
+            )
+        except LoremdError as error:
+            raise _fail(error) from error
+        payload = write_result_to_dict(result)
+        payload["supersedes"] = result.memory.frontmatter.supersedes
+        return payload
+
+    @mcp.tool(description=TOOL_DESCRIPTIONS["context_resume"])
+    async def context_resume(
+        space: str,
+        project: str | None = None,
+        query: str | None = None,
+        limit: int = 5,
+        max_chars: int = 12_000,
+    ) -> dict[str, Any]:
+        try:
+            who = await principal()
+            result = await core.handoffs.resume(
+                who,
+                space_slug=space,
+                project=project,
+                query=query,
+                limit=limit,
+                max_chars=max_chars,
+            )
+        except LoremdError as error:
+            raise _fail(error) from error
+        return resume_to_dict(result, space=space, project=project)
 
     return mcp
