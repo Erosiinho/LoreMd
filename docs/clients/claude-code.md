@@ -25,3 +25,12 @@ its instructions show up in the context.
 Tip: use one agent name per machine (`claude-code-macbook`, `claude-code-vps`).
 That name signs the commits, so it is what you read in `git log` and in the
 audit log.
+
+## Skills
+
+Copy the [LoreMd skills](../../skills/README.md) so Claude Code resumes and
+hands off on its own ("resume shop", "checkpoint"):
+
+```bash
+mkdir -p ~/.claude/skills && cp -r skills/loremd-* ~/.claude/skills/
+```

@@ -18,6 +18,10 @@ The token is shown only once. It is stored hashed on the server.
 - [Generic client](generic.md)
 - [Opening a space in Obsidian](../obsidian.md)
 
+Once connected, install the [agent skills](../../skills/README.md): they tell
+the agent to resume at the start of a session (`context_resume`), hand off at
+the end (`handoff_save`), and when to recall or record a memory.
+
 ## Checking the connection
 
 ```bash
@@ -29,8 +33,9 @@ curl -s -X POST https://memory.acme.com/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Seven tools should show up: `spaces_list`, `memory_search`, `memory_get`,
-`memory_write`, `memory_update`, `memory_supersede`, `memory_history`.
+Nine tools should show up: `spaces_list`, `memory_search`, `memory_get`,
+`memory_write`, `memory_update`, `memory_supersede`, `memory_history`,
+`handoff_save`, `context_resume`.
 
 ## Troubleshooting
 

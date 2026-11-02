@@ -36,3 +36,8 @@ asyncio.run(main())
 
 Responses are JSON: `{"matches": [...], "status": "ok"}` or
 `{"matches": [], "status": "no_match"}`.
+
+`context_resume` answers the same way: `{"status": "ok", "handoffs": [...],
+"memories": [...], "truncated": false}`, or `{"status": "no_match", ...}`.
+For when to call which tool, see the [agent skills](../../skills/README.md):
+they are plain Markdown and can go into any system prompt.
