@@ -264,18 +264,20 @@ def agent_create(
     scopes = parse_scopes(scope)
 
     async def operation(core: Loremd):
-        async with core.db.acquire() as connection:
-            agent = await AgentRepository(connection).create(
-                name, description, review_required=review
-            )
-            if not space:
-                return agent, None, []
+        # Spaces are resolved before the upsert, and all of it runs in one
+        # transaction: a bad --space must not leave a half-created agent.
+        async with core.db.transaction() as connection:
             spaces = []
-            for slug in space:
+            for slug in space or []:
                 found = await SpaceRepository(connection).get_by_slug(slug)
                 if found is None:
                     raise NotFound(f"unknown space: {slug}")
                 spaces.append(found)
+            agent = await AgentRepository(connection).create(
+                name, description, review_required=review
+            )
+            if not spaces:
+                return agent, None, []
             parts, token_hash = generate_token()
             expires_at = (
                 datetime.now(UTC) + timedelta(days=expires_days) if expires_days else None
