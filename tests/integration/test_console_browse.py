@@ -280,3 +280,51 @@ def test_pages_use_no_inline_style(console: Console) -> None:
         html = console.client.get(path).text
         assert "style=" not in html, path
         assert "<style" not in html and "<script" not in html, path
+
+
+@pytest.fixture
+def https_instance(settings: Settings) -> tuple[Loremd, Settings]:
+    """An instance whose public URL is https, like any real deployment."""
+    asyncio.run(_reset(settings.database.dsn))
+    server = settings.server.model_copy(update={"public_url": "https://memory.acme.com"})
+    configured = settings.model_copy(update={"server": server})
+    core = Loremd(configured, embeddings=HashEmbeddingProvider(settings.embeddings.dimensions))
+    return core, configured
+
+
+def _logged_in(base_url: str, instance: tuple[Loremd, Settings]) -> Iterator[TestClient]:
+    core, configured = instance
+    with TestClient(create_app(configured, core=core), base_url=base_url) as client:
+        secrets: dict[str, str] = {}
+
+        async def admin() -> None:
+            _, secrets["admin"] = await core.admins.create("admin@acme.com", PASSWORD, Role.ADMIN)
+
+        client.portal.call(admin)
+        code = totp.code_at(secrets["admin"], totp.current_step())
+        client.post(
+            "/admin/login",
+            data={"email": "admin@acme.com", "password": PASSWORD, "code": code},
+            follow_redirects=False,
+        )
+        yield client
+
+
+def test_the_console_works_over_plain_http_on_the_lan(
+    https_instance: tuple[Loremd, Settings],
+) -> None:
+    """The console is reached on a LAN port in http, even when public_url is
+    https: a Secure cookie would be dropped and the login would loop."""
+    for client in _logged_in("http://192.168.1.10:8010", https_instance):
+        assert not next(iter(client.cookies.jar)).secure
+        assert client.get("/admin", follow_redirects=False).status_code == 200
+
+
+def test_the_session_cookie_is_secure_over_https(
+    https_instance: tuple[Loremd, Settings],
+) -> None:
+    for client in _logged_in("https://memory.acme.com", https_instance):
+        cookie = next(iter(client.cookies.jar))
+        assert cookie.name == "loremd_session"
+        assert cookie.secure
+        assert client.get("/admin", follow_redirects=False).status_code == 200

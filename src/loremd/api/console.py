@@ -154,7 +154,6 @@ def _ip(request: Request) -> str | None:
 
 def build_console_router(core: Loremd) -> APIRouter:
     router = APIRouter(prefix=PREFIX, include_in_schema=False)
-    secure_cookie = core.settings.server.public_url.startswith("https://")
 
     async def current(request: Request) -> AdminSession | None:
         return await core.admins.session(request.cookies.get(SESSION_COOKIE))
@@ -252,7 +251,10 @@ def build_console_router(core: Loremd) -> APIRouter:
             raw,
             max_age=core.settings.console.session_hours * 3600,
             path=PREFIX,
-            secure=secure_cookie,
+            # Secure follows the request, not public_url: the console is often
+            # reached on a LAN port in plain http, where a Secure cookie would
+            # be dropped and the login would loop back to the form.
+            secure=request.url.scheme == "https",
             httponly=True,
             samesite="strict",
         )
