@@ -190,11 +190,14 @@ to call both tools.
   then land as `pending`; an approval publishes them with `verified: true`, a
   rejection keeps the file as `rejected`. A replacement under review leaves the
   old memory active until it is approved.
-- **Console.** `/admin`: review queue, memory history, `verified` toggle,
+- **Console.** `/admin`: an overview, a memory browser per space (filter by
+  type, status, project or text), sessions (the latest handoff of each project
+  and its whole thread), review queue, memory history, `verified` toggle,
   side-by-side conflict resolution (keep one version, merge by hand, or
-  discard), per-space sync status, audit log. Local accounts with password and
-  TOTP; the `reviewer` role sees everything but the audit log. Every decision
-  is a commit signed with the admin's email.
+  discard), per-space sync status, agents and their tokens (by prefix only),
+  audit log. Server-rendered, no JavaScript. Local accounts with password and
+  TOTP; the `reviewer` role sees everything but the agents and the audit log.
+  Every decision is a commit signed with the admin's email.
 
 Setting up the webhook and working in Obsidian: [docs/obsidian.md](docs/obsidian.md).
 

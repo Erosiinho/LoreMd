@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, csrf, when, empty, status, type_label, meter %}
+{% block title %}{{ space.slug }}{% endblock %}
+{% block content %}
+{% set base = prefix ~ "/spaces/" ~ (space.slug | urlencode) %}
+<div class="page-head">
+  <div>
+    <div class="crumbs"><a href="{{ prefix }}/spaces">Spaces</a><span>/</span><span>{{ space.slug }}</span></div>
+    <h1>{{ space.slug }}</h1>
+    <p>{{ space.description or "No description." }}</p>
+  </div>
+  <div class="row">
+    {% if space.review_required %}<span class="badge warn">review required</span>{% endif %}
+    <span class="badge" title="{{ space.remote_url or '' }}">{{ icon("git") }} {{ space.remote_url or "local only" }}</span>
+    <form method="post" action="{{ base }}/sync">{{ csrf(session) }}<button type="submit" class="small ghost">{{ icon("sync") }} Sync now</button></form>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="card stat"><span class="label">Active</span><span class="value">{{ counts.get("active", 0) }}</span></div>
+  <a class="card stat {{ 'warn' if counts.get('pending', 0) }}" href="{{ prefix }}/review?space={{ space.slug | urlencode }}"><span class="label">Pending</span><span class="value">{{ counts.get("pending", 0) }}</span></a>
+  <a class="card stat {{ 'danger' if counts.get('conflict', 0) }}" href="{{ prefix }}/conflicts"><span class="label">Conflicts</span><span class="value">{{ counts.get("conflict", 0) }}</span></a>
+  <div class="card stat"><span class="label">Superseded</span><span class="value">{{ counts.get("superseded", 0) }}</span></div>
+  <div class="card stat"><span class="label">Last sync</span><span class="value muted">{% if space.last_sync_error %}<span class="error">failed</span>{% else %}{{ when(space.last_synced_at) }}{% endif %}</span></div>
+</div>
+{% if space.last_sync_error %}<pre class="content error">{{ space.last_sync_error }}</pre>{% endif %}
+
+<div class="split">
+  <section class="card flush">
+    <div class="toolbar">
+      <div class="chips">
+        <a class="chip {{ 'on' if not filter.memory_type }}" href="{{ base }}?{{ filter.query_string(type=None) | urlencode }}">All</a>
+        {% for kind in memory_types %}
+        <a class="chip {{ 'on' if filter.memory_type and filter.memory_type.value == kind }}" href="{{ base }}?{{ filter.query_string(type=kind) | urlencode }}">{{ type_label(kind) }}<span class="n">{{ types.get(kind, 0) }}</span></a>
+        {% endfor %}
+      </div>
+      <form class="filter" method="get" action="{{ base }}">
+        {% if filter.memory_type %}<input type="hidden" name="type" value="{{ filter.memory_type.value }}">{% endif %}
+        <span class="search">{{ icon("search") }}<input type="search" name="q" value="{{ filter.query or '' }}" placeholder="Filter title or text"></span>
+        <select name="status" aria-label="Status">
+          <option value="">any status</option>
+          {% for value in statuses %}<option value="{{ value }}" {% if filter.status and filter.status.value == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+        </select>
+        <select name="project" aria-label="Project">
+          <option value="">all projects</option>
+          {% for name, n in projects %}<option value="{{ name }}" {% if filter.project == name %}selected{% endif %}>{{ name }} ({{ n }})</option>{% endfor %}
+        </select>
+        <button type="submit" class="small">Apply</button>
+      </form>
+    </div>
+    {% if page.items %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>memory</th><th>type</th><th>project</th><th>status</th><th>author</th><th class="num">updated</th></tr></thead>
+      <tbody>
+      {% for memory in page.items %}
+        <tr>
+          <td><a class="title" href="{{ prefix }}/memories/{{ memory.id | urlencode }}">{{ memory.title }}</a>
+            {% if memory.tags %}<div class="tags">{% for tag in memory.tags[:4] %}<span>{{ tag }}</span>{% endfor %}</div>{% endif %}</td>
+          <td>{{ type_label(memory.type.value) }}</td>
+          <td>{% if memory.project %}<a href="{{ base }}?{{ filter.query_string(project=memory.project) | urlencode }}">{{ memory.project }}</a>{% else %}<span class="faint">—</span>{% endif %}</td>
+          <td>{{ status(memory.status.value) }}{% if memory.verified %} {{ status("verified") }}{% endif %}</td>
+          <td class="nowrap"><small>{{ memory.author or "—" }}</small></td>
+          <td class="num nowrap"><small>{{ when(memory.updated) }}</small></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    <div class="pager">
+      <span>{{ page.total }} memor{{ "y" if page.total == 1 else "ies" }} · page {{ page.page }} of {{ page.pages }}</span>
+      <span class="row">
+        {% if page.page > 1 %}<a class="button small ghost" href="{{ base }}?{{ filter.query_string(page=page.page - 1) | urlencode }}">Previous</a>{% endif %}
+        {% if page.page < page.pages %}<a class="button small ghost" href="{{ base }}?{{ filter.query_string(page=page.page + 1) | urlencode }}">Next</a>{% endif %}
+      </span>
+    </div>
+    {% else %}
+    {{ empty("memory", "No memory matches", "Change the filters, or let an agent write one.") }}
+    {% endif %}
+  </section>
+
+  <div class="stack">
+    <section class="card">
+      <h2>Composition</h2>
+      {% if types %}{{ meter(types) }}{% endif %}
+      <ul class="list plain">
+        {% for kind in memory_types %}<li class="line">{{ type_label(kind) }}<b>{{ types.get(kind, 0) }}</b></li>{% endfor %}
+      </ul>
+    </section>
+    <section class="card flush">
+      <div class="card-head"><h2>Sessions</h2><a href="{{ prefix }}/sessions?space={{ space.slug | urlencode }}">All {{ icon("arrow") }}</a></div>
+      {% if sessions %}
+      <ul class="list">
+        {% for item in sessions[:6] %}
+        <li class="link"><a href="{{ prefix }}/sessions/thread?space={{ space.slug | urlencode }}&amp;project={{ (item.handoff.project or '') | urlencode }}">
+          <div class="item-title">{{ item.handoff.project or "space-wide" }}</div>
+          <div class="item-meta"><span>{{ item.handoff.author or "—" }}</span><span>{{ when(item.handoff.updated) }}</span></div>
+        </a></li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="hint pad">No handoff in this space yet.</p>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

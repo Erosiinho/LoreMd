@@ -1,23 +1,28 @@
 {% extends "base.html" %}
+{% from "_macros.html" import icon, empty, when %}
 {% block title %}Conflicts{% endblock %}
 {% block content %}
-<h1>Conflicts</h1>
-<p class="hint">A conflict appears when a human and an agent changed the same memory before a sync. Both versions are kept until someone picks.</p>
+<div class="page-head">
+  <div>
+    <h1>Conflicts</h1>
+    <p>A conflict appears when a human and an agent changed the same memory before a sync. Both versions are kept until someone picks.</p>
+  </div>
+</div>
 {% if not conflicts %}
-<p>No conflict.</p>
+<div class="card">{{ empty("check", "No conflict.", "Humans and agents agree.") }}</div>
 {% else %}
-<table>
-  <thead><tr><th>memory</th><th>space</th><th>versions</th><th>updated</th></tr></thead>
+<section class="card flush"><div class="table-wrap"><table>
+  <thead><tr><th>memory</th><th>space</th><th>versions</th><th class="num">updated</th></tr></thead>
   <tbody>
   {% for view in conflicts %}
     <tr>
-      <td><a href="{{ prefix }}/conflicts/{{ view.id | urlencode }}">{{ view.memory.frontmatter.title }}</a><br><small><code>{{ view.memory.path }}</code></small></td>
-      <td>{{ view.space }}</td>
-      <td>{{ "2" if view.copy else "1" }}</td>
-      <td>{{ view.memory.frontmatter.updated.isoformat(timespec="minutes") }}</td>
+      <td><a href="{{ prefix }}/conflicts/{{ view.id | urlencode }}"><b>{{ view.memory.frontmatter.title }}</b></a><br><small><code>{{ view.memory.path }}</code></small></td>
+      <td><a href="{{ prefix }}/spaces/{{ view.space | urlencode }}">{{ view.space }}</a></td>
+      <td><span class="badge danger">{{ "2" if view.copy else "1" }}</span></td>
+      <td class="num"><small>{{ when(view.memory.frontmatter.updated) }}</small></td>
     </tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div></section>
 {% endif %}
 {% endblock %}

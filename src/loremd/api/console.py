@@ -1,4 +1,4 @@
-"""Admin console under /admin: review queue, conflicts, verification, audit.
+"""Admin console under /admin: overview, spaces, sessions, review, conflicts, agents, audit.
 
 Server-rendered pages and plain HTML forms: no JavaScript, no front-end build,
 and a Content-Security-Policy that allows nothing but the console's own
@@ -11,10 +11,13 @@ cookie, and every decision is a commit signed with the admin's email.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
+from datetime import UTC, datetime
 from importlib import resources
 from typing import Any, cast
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import jinja2
 from fastapi import APIRouter, Request
@@ -22,6 +25,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from ..auth.admins import AdminSession
 from ..auth.principal import Principal
+from ..core.browse import MemoryFilter, sections_of
+from ..core.handoffs import SECTIONS
+from ..core.models import MemoryStatus, MemoryType
 from ..core.review import Keep
 from ..core.service import Loremd
 from ..db.repositories import AuditRepository
@@ -36,6 +42,58 @@ _TEMPLATES = jinja2.Environment(
     autoescape=True,
     undefined=jinja2.StrictUndefined,
 )
+
+
+def _ago(moment: datetime | None) -> str:
+    """'3 h ago', for lists; the exact time goes in a tooltip."""
+    if moment is None:
+        return "never"
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    seconds = (datetime.now(UTC) - moment).total_seconds()
+    if seconds < 0:
+        return "in the future"
+    units = ((86400 * 365, "y"), (86400 * 30, "mo"), (86400, "d"), (3600, "h"), (60, "min"))
+    for size, unit in units:
+        if seconds >= size:
+            return f"{int(seconds // size)} {unit} ago"
+    return "just now"
+
+
+def _stamp(moment: datetime | None) -> str:
+    if moment is None:
+        return "—"
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+
+_BULLET = re.compile(r"^(\s*)- \[( |x|X)\] |^(\s*)- ", re.MULTILINE)
+
+
+def _bullets(text: str) -> str:
+    """Markdown list markers as glyphs, for handoff sections shown as plain text."""
+
+    def glyph(match: re.Match[str]) -> str:
+        if match.group(2) is not None:
+            return f"{match.group(1)}{'☑' if match.group(2) in 'xX' else '☐'} "
+        return f"{match.group(3)}• "
+
+    return _BULLET.sub(glyph, text)
+
+
+_TEMPLATES.filters["ago"] = _ago
+_TEMPLATES.filters["bullets"] = _bullets
+_TEMPLATES.filters["stamp"] = _stamp
+_TEMPLATES.globals.update(
+    prefix=PREFIX,
+    sections_of=sections_of,
+    section_titles=SECTIONS,
+)
+
+#: Badge counts of the sidebar, filled in once per request by `page`.
+_NAV: ContextVar[dict[str, int] | None] = ContextVar("loremd_console_nav", default=None)
+
 _STYLESHEET = resources.files("loremd.api").joinpath("static/console.css").read_text("utf-8")
 
 _SECURITY_HEADERS = {
@@ -78,6 +136,7 @@ def _secure_headers(response: Response) -> Response:
 def _render(template: str, *, status_code: int = 200, **context: Any) -> HTMLResponse:
     context.setdefault("session", None)
     context.setdefault("notice", None)
+    context.setdefault("nav", _NAV.get() or {"pending": 0, "conflicts": 0})
     html = _TEMPLATES.get_template(template).render(prefix=PREFIX, **context)
     return HTMLResponse(html, status_code=status_code, headers=_SECURITY_HEADERS)
 
@@ -115,6 +174,13 @@ def build_console_router(core: Loremd) -> APIRouter:
                 message="This page is reserved to the admin role.",
             )
         try:
+            counts = await core.review.counts(session.principal(_ip(request)))
+            _NAV.set(
+                {
+                    "pending": sum(c.get("pending", 0) for c in counts.values()),
+                    "conflicts": sum(c.get("conflict", 0) for c in counts.values()),
+                }
+            )
             return await handler(request, session)
         except LoremdError as error:
             return _render(
@@ -208,12 +274,68 @@ def build_console_router(core: Loremd) -> APIRouter:
     async def dashboard(request: Request) -> Response:
         async def handler(request: Request, session: AdminSession) -> Response:
             who = principal(request, session)
+            activity = None
+            if session.is_admin:
+                async with core.db.acquire() as connection:
+                    activity = await AuditRepository(connection).tail(8)
             return _render(
                 "dashboard.html",
                 session=session,
+                active="home",
                 notice=NOTICES.get(request.query_params.get("notice", "")),
+                overview=await core.browse.overview(who),
                 spaces=await core.spaces.list(),
                 counts=await core.review.counts(who),
+                sessions=(await core.browse.sessions(who, limit=5)),
+                activity=activity,
+            )
+
+        return await page(request, handler)
+
+    # -- spaces --------------------------------------------------------------
+
+    @router.get("/spaces")
+    async def spaces(request: Request) -> Response:
+        async def handler(request: Request, session: AdminSession) -> Response:
+            who = principal(request, session)
+            listed = await core.spaces.list()
+            return _render(
+                "spaces.html",
+                session=session,
+                active="spaces",
+                notice=NOTICES.get(request.query_params.get("notice", "")),
+                spaces=listed,
+                counts=await core.review.counts(who),
+                types={s.slug: await core.browse.type_counts(who, s.slug) for s in listed},
+            )
+
+        return await page(request, handler)
+
+    @router.get("/spaces/{slug}")
+    async def space(request: Request, slug: str) -> Response:
+        async def handler(request: Request, session: AdminSession) -> Response:
+            who = principal(request, session)
+            found = await core.browse.space(who, slug)
+            memory_filter = MemoryFilter.parse(request.query_params)
+            try:
+                page_number = max(1, int(request.query_params.get("page", "1")))
+            except ValueError:
+                page_number = 1
+            counts = await core.review.counts(who)
+            return _render(
+                "space.html",
+                session=session,
+                active="spaces",
+                notice=NOTICES.get(request.query_params.get("notice", "")),
+                space=found,
+                counts=counts.get(found.slug, {}),
+                types=await core.browse.type_counts(who, slug),
+                projects=await core.browse.projects(who, slug),
+                filter=memory_filter,
+                page=await core.browse.memories(who, slug, memory_filter, page=page_number),
+                sessions=await core.browse.sessions(who, space_slug=slug, limit=50),
+                memory_types=[t.value for t in MemoryType],
+                statuses=[s.value for s in MemoryStatus],
             )
 
         return await page(request, handler)
@@ -226,9 +348,58 @@ def build_console_router(core: Loremd) -> APIRouter:
             await core.audit.record(
                 principal(request, session), "console_sync", target=slug, space_id=space.id
             )
-            return _redirect("", notice="synced")
+            return _redirect(f"/spaces/{quote(space.slug)}", notice="synced")
 
         return await action(request, handler)
+
+    # -- sessions ------------------------------------------------------------
+
+    @router.get("/sessions")
+    async def sessions(request: Request) -> Response:
+        async def handler(request: Request, session: AdminSession) -> Response:
+            space_slug = request.query_params.get("space") or None
+            return _render(
+                "sessions.html",
+                session=session,
+                active="sessions",
+                space=space_slug,
+                spaces=await core.spaces.list(),
+                sessions=await core.browse.sessions(
+                    principal(request, session), space_slug=space_slug
+                ),
+            )
+
+        return await page(request, handler)
+
+    @router.get("/sessions/thread")
+    async def thread(request: Request) -> Response:
+        async def handler(request: Request, session: AdminSession) -> Response:
+            space_slug = request.query_params.get("space", "")
+            project = request.query_params.get("project") or None
+            return _render(
+                "thread.html",
+                session=session,
+                active="sessions",
+                space=space_slug,
+                project=project,
+                handoffs=await core.browse.thread(principal(request, session), space_slug, project),
+            )
+
+        return await page(request, handler)
+
+    # -- agents and tokens -----------------------------------------------------
+
+    @router.get("/agents")
+    async def agents(request: Request) -> Response:
+        async def handler(request: Request, session: AdminSession) -> Response:
+            return _render(
+                "agents.html",
+                session=session,
+                active="agents",
+                agents=await core.browse.agents(principal(request, session)),
+            )
+
+        return await page(request, handler, admin_only=True)
 
     # -- review queue --------------------------------------------------------
 
@@ -239,6 +410,7 @@ def build_console_router(core: Loremd) -> APIRouter:
             return _render(
                 "review.html",
                 session=session,
+                active="review",
                 notice=NOTICES.get(request.query_params.get("notice", "")),
                 space=space,
                 spaces=await core.spaces.list(),
@@ -285,6 +457,8 @@ def build_console_router(core: Loremd) -> APIRouter:
             return _render(
                 "memory.html",
                 session=session,
+                active="spaces",
+                sections=sections_of(found) if found.type is MemoryType.HANDOFF else {},
                 notice=NOTICES.get(request.query_params.get("notice", "")),
                 memory=found,
                 history=resolved.repo.history(found.path),
@@ -300,6 +474,7 @@ def build_console_router(core: Loremd) -> APIRouter:
             return _render(
                 "conflicts.html",
                 session=session,
+                active="conflicts",
                 notice=NOTICES.get(request.query_params.get("notice", "")),
                 conflicts=await core.review.conflicts(principal(request, session)),
             )
@@ -310,7 +485,7 @@ def build_console_router(core: Loremd) -> APIRouter:
     async def conflict(request: Request, memory_id: str) -> Response:
         async def handler(request: Request, session: AdminSession) -> Response:
             view = await core.review.conflict(principal(request, session), memory_id)
-            return _render("conflict.html", session=session, view=view)
+            return _render("conflict.html", session=session, active="conflicts", view=view)
 
         return await page(request, handler)
 
@@ -351,6 +526,7 @@ def build_console_router(core: Loremd) -> APIRouter:
             return _render(
                 "audit.html",
                 session=session,
+                active="audit",
                 entries=entries,
                 actor=actor or "",
                 action=action_name or "",
@@ -360,4 +536,3 @@ def build_console_router(core: Loremd) -> APIRouter:
         return await page(request, handler, admin_only=True)
 
     return router
-

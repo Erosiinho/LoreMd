@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, when, empty, status %}
+{% block title %}Agents{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Agents &amp; tokens</h1>
+    <p>Who can reach the MCP endpoint, on which spaces. Tokens show their prefix only: the secret is never stored.</p>
+  </div>
+</div>
+<div class="callout">Manage them on the server: <code>loremd agent create &lt;name&gt; --space &lt;slug&gt;</code>, <code>loremd token revoke &lt;prefix&gt;</code>, <code>loremd agent disable &lt;name&gt;</code>.</div>
+
+{% if not agents %}
+<div class="card">{{ empty("agents", "No agent yet") }}</div>
+{% else %}
+<div class="stack gap-top">
+  {% for agent in agents %}
+  <section class="card flush">
+    <div class="card-head">
+      <div>
+        <h2 class="item-title">{{ icon("agents") }} {{ agent.name }}
+          {% if agent.disabled_at %}<span class="badge danger">disabled</span>{% else %}<span class="badge ok dot">enabled</span>{% endif %}
+          {% if agent.review_required %}<span class="badge warn">writes need review</span>{% endif %}</h2>
+        <div class="item-meta">
+          {% if agent.description %}<span>{{ agent.description }}</span>{% endif %}
+          <span>created {{ when(agent.created_at) }}</span>
+          <span>last used {{ when(agent.last_used_at) }}</span>
+          <a href="{{ prefix }}/audit?actor={{ agent.name | urlencode }}">activity {{ icon("arrow") }}</a>
+        </div>
+      </div>
+      <span class="badge">{{ agent.active_tokens }} active token{{ "s" if agent.active_tokens != 1 }}</span>
+    </div>
+    {% if agent.tokens %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>token</th><th>state</th><th>scopes</th><th>spaces</th><th>created</th><th>expires</th><th>last used</th></tr></thead>
+      <tbody>
+      {% for token in agent.tokens %}
+        <tr>
+          <td>{{ icon("key") }} <code>{{ token.prefix }}…</code></td>
+          <td>{{ status(token.state) }}</td>
+          <td>{% for scope in token.scopes %}<span class="badge">{{ scope }}</span> {% endfor %}</td>
+          <td>{% for slug in token.spaces %}<a class="badge" href="{{ prefix }}/spaces/{{ slug | urlencode }}">{{ slug }}</a> {% else %}<span class="faint">—</span>{% endfor %}</td>
+          <td><small>{{ when(token.created_at) }}</small></td>
+          <td><small>{% if token.expires_at %}{{ token.expires_at | stamp }}{% else %}never{% endif %}</small></td>
+          <td><small>{{ when(token.last_used_at) }}</small></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}
+    <p class="hint pad">No token.</p>
+    {% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

@@ -2,8 +2,13 @@
 {% from "_macros.html" import csrf %}
 {% block title %}Conflict · {{ view.memory.frontmatter.title }}{% endblock %}
 {% block content %}
-<h1>Conflict: {{ view.memory.frontmatter.title }}</h1>
-<p class="hint">Space <strong>{{ view.space }}</strong>. Whatever you choose ends up at <code>{{ view.memory.path }}</code>, active and verified, in a commit signed with your email. Git keeps every version.</p>
+<div class="page-head">
+  <div>
+    <div class="crumbs"><a href="{{ prefix }}/conflicts">Conflicts</a><span>/</span><span>{{ view.space }}</span></div>
+    <h1>Conflict: {{ view.memory.frontmatter.title }}</h1>
+    <p>Space <strong>{{ view.space }}</strong>. Whatever you choose ends up at <code>{{ view.memory.path }}</code>, active and verified, in a commit signed with your email. Git keeps every version.</p>
+  </div>
+</div>
 <div class="versions">
   {% for label, version in [("memory", view.memory), ("copy", view.copy)] if version %}
   <section class="version">
@@ -18,7 +23,7 @@
   </section>
   {% endfor %}
 </div>
-<form class="resolve" method="post" action="{{ prefix }}/conflicts/{{ view.id | urlencode }}/resolve">
+<form class="resolve card" method="post" action="{{ prefix }}/conflicts/{{ view.id | urlencode }}/resolve">
   {{ csrf(session) }}
   <fieldset>
     <legend>Keep</legend>

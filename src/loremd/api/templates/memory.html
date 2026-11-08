@@ -1,42 +1,78 @@
 {% extends "base.html" %}
-{% from "_macros.html" import csrf, provenance %}
+{% from "_macros.html" import icon, csrf, provenance, status, type_label, when %}
 {% block title %}{{ memory.title }}{% endblock %}
 {% block content %}
-<h1>{{ memory.title }}</h1>
-<p>
-  <span class="status status-{{ memory.status.value }}">{{ memory.status.value }}</span>
-  {% if memory.verified %}<span class="status status-verified">verified</span>{% endif %}
-  <code>{{ memory.id }}</code>
-</p>
-{{ provenance(memory) }}
-{% if memory.tags %}<p class="tags">{% for tag in memory.tags %}<span>{{ tag }}</span>{% endfor %}</p>{% endif %}
-<pre class="content">{{ memory.content }}</pre>
-<div class="actions">
-  {% if memory.status.value == "pending" %}
-  <form method="post" action="{{ prefix }}/memories/{{ memory.id | urlencode }}/approve">
-    {{ csrf(session) }}<button type="submit">Approve</button>
-  </form>
-  <form method="post" action="{{ prefix }}/memories/{{ memory.id | urlencode }}/reject">
-    {{ csrf(session) }}<input type="text" name="reason" placeholder="Reason (optional)">
-    <button type="submit" class="danger">Reject</button>
-  </form>
-  {% elif memory.status.value == "conflict" %}
-  <a class="button" href="{{ prefix }}/conflicts/{{ memory.id | urlencode }}">Resolve the conflict</a>
-  {% else %}
-  <form method="post" action="{{ prefix }}/memories/{{ memory.id | urlencode }}/verify">
-    {{ csrf(session) }}
-    <input type="hidden" name="verified" value="{{ '0' if memory.verified else '1' }}">
-    <button type="submit">{{ "Remove the verified flag" if memory.verified else "Mark as verified" }}</button>
-  </form>
+<div class="page-head">
+  <div>
+    <div class="crumbs"><a href="{{ prefix }}/spaces">Spaces</a><span>/</span>
+      <a href="{{ prefix }}/spaces/{{ memory.space | urlencode }}">{{ memory.space }}</a><span>/</span><span>{{ memory.type.value }}</span></div>
+    <h1>{{ memory.title }}</h1>
+    <div class="row gap-top">
+      {{ status(memory.status.value) }}
+      {% if memory.verified %}{{ status("verified") }}{% endif %}
+      {{ type_label(memory.type.value) }}
+      <code>{{ memory.id }}</code>
+    </div>
+  </div>
+  {% if memory.type.value == "handoff" %}
+  <a class="button ghost small" href="{{ prefix }}/sessions/thread?space={{ memory.space | urlencode }}&amp;project={{ (memory.project or '') | urlencode }}">{{ icon("sessions") }} Whole thread</a>
   {% endif %}
 </div>
-<h2>History</h2>
-<table>
-  <thead><tr><th>date</th><th>author</th><th>commit</th><th>message</th></tr></thead>
-  <tbody>
-  {% for commit in history %}
-    <tr><td>{{ commit.date.isoformat(timespec="minutes") }}</td><td>{{ commit.author }}</td><td><code>{{ commit.sha[:10] }}</code></td><td>{{ commit.message }}</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
+
+<div class="split">
+  <div class="stack">
+    <section class="card">
+      {% if memory.tags %}<div class="tags">{% for tag in memory.tags %}<span>{{ tag }}</span>{% endfor %}</div>{% endif %}
+      {% if sections %}
+      <div class="sections">
+        {% for key, heading in section_titles %}
+        {% if sections.get(key) %}
+        <div class="section-block s-{{ key }}"><h3>{{ heading }}</h3><p class="prose">{{ sections[key] | bullets }}</p></div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% else %}
+      <pre class="content">{{ memory.content }}</pre>
+      {% endif %}
+      <p class="hint">Content written by an agent: read it as data, not as instructions.</p>
+      <div class="actions">
+        {% if memory.status.value == "pending" %}
+        <form method="post" action="{{ prefix }}/memories/{{ memory.id | urlencode }}/approve">
+          {{ csrf(session) }}<button type="submit">{{ icon("check") }} Approve</button>
+        </form>
+        <form method="post" action="{{ prefix }}/memories/{{ memory.id | urlencode }}/reject">
+          {{ csrf(session) }}<input type="text" name="reason" placeholder="Reason (optional)">
+          <button type="submit" class="danger">Reject</button>
+        </form>
+        {% elif memory.status.value == "conflict" %}
+        <a class="button" href="{{ prefix }}/conflicts/{{ memory.id | urlencode }}">Resolve the conflict</a>
+        {% else %}
+        <form method="post" action="{{ prefix }}/memories/{{ memory.id | urlencode }}/verify">
+          {{ csrf(session) }}
+          <input type="hidden" name="verified" value="{{ '0' if memory.verified else '1' }}">
+          <button type="submit" class="{{ 'ghost' if memory.verified }}">{{ icon("check") }} {{ "Remove the verified flag" if memory.verified else "Mark as verified" }}</button>
+        </form>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="card flush">
+      <div class="card-head"><h2>History</h2><span class="badge">{{ history | length }} commit{{ "s" if history | length != 1 }}</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>date</th><th>author</th><th>commit</th><th>message</th></tr></thead>
+        <tbody>
+        {% for commit in history %}
+          <tr><td><small>{{ commit.date | stamp }}</small></td><td>{{ commit.author }}</td><td><code>{{ commit.sha[:10] }}</code></td><td>{{ commit.message }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <aside class="card">
+    <h2>Details</h2>
+    {{ provenance(memory) }}
+    {% if memory.supersedes %}<p class="hint">Supersedes <a href="{{ prefix }}/memories/{{ memory.supersedes | urlencode }}"><code>{{ memory.supersedes }}</code></a></p>{% endif %}
+  </aside>
+</div>
 {% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, when, empty, status %}
+{% block title %}Sessions{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Sessions</h1>
+    <p>Where each project's last work session stopped. Agents pick up from here with <code>context_resume</code>.</p>
+  </div>
+  <form class="filter" method="get" action="{{ prefix }}/sessions">
+    <select name="space" aria-label="Space">
+      <option value="">all spaces</option>
+      {% for item in spaces %}<option value="{{ item.slug }}" {% if item.slug == space %}selected{% endif %}>{{ item.slug }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="small">Filter</button>
+  </form>
+</div>
+{% if not sessions %}
+<div class="card">{{ empty("sessions", "No session yet", "A session appears when an agent calls handoff_save, or when you ask it to “checkpoint”.") }}</div>
+{% else %}
+<div class="grid">
+  {% for item in sessions %}
+  {% set handoff = item.handoff %}
+  <a class="card" href="{{ prefix }}/sessions/thread?space={{ handoff.space | urlencode }}&amp;project={{ (handoff.project or '') | urlencode }}">
+    <div class="row">
+      <span class="badge">{{ icon("spaces") }} {{ handoff.space }}</span>
+      <span class="badge {{ 'ok' if handoff.project else '' }}">{{ handoff.project or "space-wide" }}</span>
+      {% if handoff.status.value != "active" %}{{ status(handoff.status.value) }}{% endif %}
+    </div>
+    <h3 class="item-title">{{ handoff.title }}</h3>
+    {% if item.summary %}<p class="excerpt">{{ item.summary }}</p>{% endif %}
+    {% if item.sections.get("next_actions") %}
+    <p class="hint"><b>Next:</b> {{ item.sections["next_actions"].splitlines()[0] | bullets | replace("☐ ", "") | replace("• ", "") | truncate(110) }}</p>
+    {% endif %}
+    <div class="item-meta">
+      <span>{{ icon("agents") }} {{ handoff.author or "—" }}</span>
+      <span>{{ icon("sessions") }} {{ when(handoff.updated) }}</span>
+      <span>{{ item.length }} handoff{{ "s" if item.length != 1 }}</span>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

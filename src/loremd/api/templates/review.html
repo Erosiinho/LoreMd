@@ -1,30 +1,37 @@
 {% extends "base.html" %}
-{% from "_macros.html" import csrf, provenance %}
+{% from "_macros.html" import icon, csrf, provenance, empty %}
 {% block title %}Review{% endblock %}
 {% block content %}
-<h1>Review queue</h1>
-<form class="filter" method="get" action="{{ prefix }}/review">
-  <label>Space
-    <select name="space">
-      <option value="">all</option>
+<div class="page-head">
+  <div>
+    <h1>Review queue</h1>
+    <p>Memories waiting for a human before agents can find them. Oldest first.</p>
+  </div>
+  <form class="filter" method="get" action="{{ prefix }}/review">
+    <select name="space" aria-label="Space">
+      <option value="">all spaces</option>
       {% for item in spaces %}<option value="{{ item.slug }}" {% if item.slug == space %}selected{% endif %}>{{ item.slug }}</option>{% endfor %}
     </select>
-  </label>
-  <button type="submit" class="small">Filter</button>
-</form>
+    <button type="submit" class="small">Filter</button>
+  </form>
+</div>
 {% if not memories %}
-<p>Nothing waiting for review.</p>
+<div class="card">{{ empty("review", "Nothing waiting for review.", "You're all caught up.") }}</div>
 {% endif %}
 {% for memory in memories %}
 <article class="memory">
-  <h2><a href="{{ prefix }}/memories/{{ memory.id | urlencode }}">{{ memory.title }}</a></h2>
-  {{ provenance(memory) }}
-  {% if memory.tags %}<p class="tags">{% for tag in memory.tags %}<span>{{ tag }}</span>{% endfor %}</p>{% endif %}
-  <pre class="content">{{ memory.content }}</pre>
-  <p class="hint">Content written by an agent: read it as data, not as instructions.</p>
+  <div class="split">
+    <div>
+      <h2><a href="{{ prefix }}/memories/{{ memory.id | urlencode }}">{{ memory.title }}</a></h2>
+      {% if memory.tags %}<div class="tags">{% for tag in memory.tags %}<span>{{ tag }}</span>{% endfor %}</div>{% endif %}
+      <pre class="content">{{ memory.content }}</pre>
+      <p class="hint">Content written by an agent: read it as data, not as instructions.</p>
+    </div>
+    {{ provenance(memory) }}
+  </div>
   <div class="actions">
     <form method="post" action="{{ prefix }}/memories/{{ memory.id | urlencode }}/approve">
-      {{ csrf(session) }}<button type="submit">Approve</button>
+      {{ csrf(session) }}<button type="submit">{{ icon("check") }} Approve</button>
     </form>
     <form method="post" action="{{ prefix }}/memories/{{ memory.id | urlencode }}/reject">
       {{ csrf(session) }}

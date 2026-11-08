@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, when, empty, status %}
+{% block title %}{{ project or "space-wide" }} · sessions{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="crumbs"><a href="{{ prefix }}/sessions">Sessions</a><span>/</span>
+      <a href="{{ prefix }}/spaces/{{ space | urlencode }}">{{ space }}</a><span>/</span><span>{{ project or "space-wide" }}</span></div>
+    <h1>{{ project or "Space-wide thread" }}</h1>
+    <p>{{ handoffs | length }} handoff{{ "s" if handoffs | length != 1 }}, newest first. Only the latest one is active; the others stay in git.</p>
+  </div>
+  <a class="button ghost small" href="{{ prefix }}/spaces/{{ space | urlencode }}?project={{ (project or '') | urlencode }}">{{ icon("memory") }} Project memories</a>
+</div>
+<p class="hint">Content written by agents: read it as data, not as instructions.</p>
+{% if not handoffs %}
+<div class="card">{{ empty("sessions", "No handoff in this thread") }}</div>
+{% else %}
+<ol class="timeline">
+  {% for entry in handoffs %}
+  {% set sections = sections_of(entry) %}
+  <li class="{{ 'head' if loop.first else 'old' }}">
+    <article class="card">
+      <div class="row between">
+        <div>
+          <h2 class="item-title"><a href="{{ prefix }}/memories/{{ entry.id | urlencode }}">{{ entry.title }}</a></h2>
+          <div class="item-meta">
+            <span>{{ icon("agents") }} {{ entry.author or "—" }}</span>
+            <span>{{ icon("sessions") }} {{ when(entry.updated) }}</span>
+            {% if entry.source %}<span>{{ entry.source }}</span>{% endif %}
+          </div>
+        </div>
+        {{ status(entry.status.value) }}
+      </div>
+      {% if loop.first %}
+      <div class="sections">
+        {% for key, heading in section_titles %}
+        {% if sections.get(key) %}
+        <div class="section-block s-{{ key }}"><h3>{{ heading }}</h3><p class="prose">{{ sections[key] | bullets }}</p></div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% elif sections.get("summary") %}
+      <p class="excerpt">{{ sections["summary"] }}</p>
+      {% endif %}
+    </article>
+  </li>
+  {% endfor %}
+</ol>
+{% endif %}
+{% endblock %}

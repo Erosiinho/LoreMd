@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, csrf, when, empty, meter %}
+{% block title %}Spaces{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Spaces</h1>
+    <p>One git repository each. Tokens are scoped to one or more spaces.</p>
+  </div>
+</div>
+{% if not spaces %}
+<div class="card">{{ empty("spaces", "No space yet", "Create one on the server: loremd space create <slug>") }}</div>
+{% else %}
+<div class="grid">
+  {% for space in spaces %}
+  {% set count = counts.get(space.slug, {}) %}
+  <article class="card space-card">
+    <h3>{{ icon("spaces") }}<a href="{{ prefix }}/spaces/{{ space.slug | urlencode }}">{{ space.slug }}</a>
+      {% if space.review_required %}<span class="badge warn">review</span>{% endif %}</h3>
+    <p>{{ space.description or "" }}</p>
+    {{ meter(types.get(space.slug, {})) }}
+    <div class="kv">
+      <span><b>{{ count.get("active", 0) }}</b> active</span>
+      {% if count.get("pending", 0) %}<a href="{{ prefix }}/review?space={{ space.slug | urlencode }}"><b>{{ count.get("pending") }}</b> pending</a>{% endif %}
+      {% if count.get("conflict", 0) %}<a class="warn" href="{{ prefix }}/conflicts"><b>{{ count.get("conflict") }}</b> conflict</a>{% endif %}
+      <span><b>{{ count.get("superseded", 0) }}</b> superseded</span>
+    </div>
+    <div class="kv" title="{{ space.remote_url or 'local repository only' }}">
+      <span>{{ icon("git") }} {{ "remote" if space.remote_url else "local only" }}</span>
+      <span>{{ icon("sync") }}
+        {% if space.last_sync_error %}<span class="error">sync failed</span>
+        {% elif space.last_synced_at %}synced {{ when(space.last_synced_at) }}
+        {% else %}never synced{% endif %}</span>
+    </div>
+    {% if space.last_sync_error %}<pre class="content error">{{ space.last_sync_error }}</pre>{% endif %}
+    <div class="actions">
+      <a class="button small" href="{{ prefix }}/spaces/{{ space.slug | urlencode }}">Browse {{ icon("arrow") }}</a>
+      <form method="post" action="{{ prefix }}/spaces/{{ space.slug | urlencode }}/sync">
+        {{ csrf(session) }}<button type="submit" class="small ghost">{{ icon("sync") }} Sync now</button>
+      </form>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

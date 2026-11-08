@@ -1,41 +1,104 @@
 {% extends "base.html" %}
-{% from "_macros.html" import csrf %}
-{% block title %}Spaces{% endblock %}
+{% from "_macros.html" import icon, type_label, when, empty, meter %}
+{% block title %}Overview{% endblock %}
 {% block content %}
-<h1>Spaces</h1>
-{% if not spaces %}
-<p>No space yet: <code>loremd space create &lt;slug&gt;</code>.</p>
-{% else %}
-<table>
-  <thead>
-    <tr><th>space</th><th>active</th><th>pending</th><th>conflict</th><th>review</th><th>remote</th><th>last sync</th><th></th></tr>
-  </thead>
-  <tbody>
-  {% for space in spaces %}
-    {% set count = counts.get(space.slug, {}) %}
-    <tr>
-      <td><strong>{{ space.slug }}</strong>{% if space.description %}<br><small>{{ space.description }}</small>{% endif %}</td>
-      <td>{{ count.get("active", 0) }}</td>
-      <td>{% if count.get("pending", 0) %}<a href="{{ prefix }}/review?space={{ space.slug | urlencode }}">{{ count.get("pending") }}</a>{% else %}0{% endif %}</td>
-      <td>{% if count.get("conflict", 0) %}<a class="warn" href="{{ prefix }}/conflicts">{{ count.get("conflict") }}</a>{% else %}0{% endif %}</td>
-      <td>{{ "required" if space.review_required else "—" }}</td>
-      <td><small>{{ space.remote_url or "—" }}</small></td>
-      <td>
-        {% if space.last_sync_error %}<span class="error" title="{{ space.last_sync_error }}">failed</span>
-        {% elif space.last_synced_at %}{{ space.last_synced_at.isoformat(timespec="minutes") }}
-        {% else %}—{% endif %}
-      </td>
-      <td>
-        <form method="post" action="{{ prefix }}/spaces/{{ space.slug | urlencode }}/sync">
-          {{ csrf(session) }}<button type="submit" class="small">Sync now</button>
-        </form>
-      </td>
-    </tr>
-    {% if space.last_sync_error %}
-    <tr class="detail"><td colspan="8"><pre class="error">{{ space.last_sync_error }}</pre></td></tr>
+<div class="page-head">
+  <div>
+    <h1>Overview</h1>
+    <p>What your agents remember, and where their last sessions stopped.</p>
+  </div>
+</div>
+
+<div class="stats">
+  <a class="card stat" href="{{ prefix }}/spaces"><span class="label">{{ icon("spaces") }}Spaces</span><span class="value">{{ overview.spaces }}</span></a>
+  <div class="card stat"><span class="label">{{ icon("memory") }}Active memories</span><span class="value">{{ overview.active }}</span></div>
+  <a class="card stat" href="{{ prefix }}/sessions"><span class="label">{{ icon("sessions") }}Open sessions</span><span class="value">{{ overview.sessions }}</span></a>
+  <a class="card stat {{ 'warn' if overview.pending }}" href="{{ prefix }}/review"><span class="label">{{ icon("review") }}Pending review</span><span class="value">{{ overview.pending }}</span></a>
+  <a class="card stat {{ 'danger' if overview.conflicts }}" href="{{ prefix }}/conflicts"><span class="label">{{ icon("conflict") }}Conflicts</span><span class="value">{{ overview.conflicts }}</span></a>
+</div>
+
+<div class="split">
+  <div class="stack">
+    <section class="card flush">
+      <div class="card-head"><h2>Latest sessions</h2><a href="{{ prefix }}/sessions">All sessions {{ icon("arrow") }}</a></div>
+      {% if sessions %}
+      <ul class="list">
+        {% for item in sessions %}
+        <li class="link"><a href="{{ prefix }}/sessions/thread?space={{ item.handoff.space | urlencode }}&amp;project={{ (item.handoff.project or '') | urlencode }}">
+          <div class="item-title">{{ item.handoff.title }}</div>
+          <div class="item-meta">
+            <span>{{ icon("spaces") }} {{ item.handoff.space }}{% if item.handoff.project %} / <b>{{ item.handoff.project }}</b>{% endif %}</span>
+            <span>{{ icon("agents") }} {{ item.handoff.author or "—" }}</span>
+            <span>{{ when(item.handoff.updated) }}</span>
+          </div>
+          {% if item.summary %}<p class="excerpt">{{ item.summary }}</p>{% endif %}
+        </a></li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      {{ empty("sessions", "No session yet", "Agents save one with handoff_save when they stop working.") }}
+      {% endif %}
+    </section>
+
+    {% if activity is not none %}
+    <section class="card flush">
+      <div class="card-head"><h2>Recent activity</h2><a href="{{ prefix }}/audit">Audit log {{ icon("arrow") }}</a></div>
+      {% if activity %}
+      <div class="table-wrap"><table>
+        <tbody>
+        {% for entry in activity %}
+          <tr>
+            <td><b>{{ entry["actor"] }}</b></td>
+            <td><span class="badge">{{ entry["action"] }}</span></td>
+            <td><small>{{ (entry["target"] or "")[:60] }}</small></td>
+            <td>{{ entry["space"] or "" }}</td>
+            <td class="num"><small>{{ when(entry["created_at"]) }}</small></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+      {% else %}
+      {{ empty("audit", "Nothing yet") }}
+      {% endif %}
+    </section>
     {% endif %}
-  {% endfor %}
-  </tbody>
-</table>
-{% endif %}
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <h2>Memories by type</h2>
+      {% if overview.by_type %}
+      {{ meter(overview.by_type) }}
+      <ul class="list plain">
+        {% for kind, n in overview.by_type | dictsort(by="value", reverse=true) %}
+        <li class="line">{{ type_label(kind) }}<b>{{ n }}</b></li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="hint">No active memory yet.</p>
+      {% endif %}
+    </section>
+    <section class="card">
+      <h2>Spaces</h2>
+      {% if spaces %}
+      <ul class="list plain">
+        {% for space in spaces %}
+        {% set count = counts.get(space.slug, {}) %}
+        <li class="line">
+          <a href="{{ prefix }}/spaces/{{ space.slug | urlencode }}"><b>{{ space.slug }}</b></a>
+          <span class="row">
+            <span class="muted">{{ count.get("active", 0) }}</span>
+            {% if count.get("pending", 0) %}<span class="badge warn">{{ count.get("pending") }} pending</span>{% endif %}
+            {% if count.get("conflict", 0) %}<span class="badge danger">{{ count.get("conflict") }} conflict</span>{% endif %}
+            {% if space.last_sync_error %}<span class="badge danger">sync failed</span>{% endif %}
+          </span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="hint">No space yet: <code>loremd space create &lt;slug&gt;</code>.</p>
+      {% endif %}
+    </section>
+  </div>
+</div>
 {% endblock %}
