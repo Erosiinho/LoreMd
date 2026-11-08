@@ -85,6 +85,11 @@ def build_mcp(core: Loremd) -> FastMCP:
 
     async def principal() -> Principal:
         call = current_context()
+        if call.principal is not None:
+            # Verified by the HTTP gate for this very request: only the rate
+            # limit is left to apply.
+            core.auth.charge(call.principal)
+            return call.principal
         return await core.auth.authenticate(call.token, ip=call.ip)
 
     @mcp.tool(description=TOOL_DESCRIPTIONS["spaces_list"])

@@ -72,6 +72,16 @@ class RateLimiter:
             )
         bucket.tokens -= 1.0
 
+    def blocked(self, key: str) -> bool:
+        """Whether the next `check` for `key` would fail, without consuming anything."""
+        if not self.enabled:
+            return False
+        bucket = self._buckets.get(key)
+        if bucket is None:
+            return False
+        elapsed = max(self._clock() - bucket.updated, 0.0)
+        return min(self._capacity, bucket.tokens + elapsed * self._rate) < 1.0
+
     def _prune(self, now: float) -> None:
         for key, bucket in list(self._buckets.items()):
             if now - bucket.updated > _IDLE_SECONDS:

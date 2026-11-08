@@ -64,3 +64,24 @@ def test_zero_disables_the_limit() -> None:
         limiter.check("abcd1234")
 
     assert not limiter.enabled
+
+
+def test_blocked_peeks_without_consuming() -> None:
+    clock = FakeClock()
+    limiter = RateLimiter(requests_per_minute=60, burst=2, clock=clock)
+
+    assert not limiter.blocked("ip")
+    limiter.check("ip")
+    assert not limiter.blocked("ip")
+    assert not limiter.blocked("ip"), "peeking must not spend the last unit"
+    limiter.check("ip")
+
+    assert limiter.blocked("ip")
+    clock.advance(1.0)
+    assert not limiter.blocked("ip")
+
+
+def test_a_disabled_limiter_never_blocks() -> None:
+    limiter = RateLimiter(requests_per_minute=0, burst=0, clock=FakeClock())
+
+    assert not limiter.blocked("ip")

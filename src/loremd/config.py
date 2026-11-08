@@ -98,6 +98,9 @@ class LimitsConfig(BaseModel):
 
     requests_per_minute: int = 120
     burst: int = 40
+    #: Failed authentications per minute and per client IP before the MCP
+    #: endpoint answers 429 without touching the database. 0 disables it.
+    failed_auth_per_minute: int = 30
 
 
 class Settings(BaseSettings):

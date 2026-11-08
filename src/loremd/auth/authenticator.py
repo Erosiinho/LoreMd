@@ -58,13 +58,22 @@ class Authenticator:
         if self._limiter is not None:
             self._limiter.check(key)
 
-    async def authenticate(self, raw_token: str | None, *, ip: str | None = None) -> Principal:
+    def charge(self, principal: Principal) -> None:
+        """Applies the rate limit to a principal authenticated with `charge=False`."""
+        self._limit(principal.token_prefix or principal.name)
+
+    async def authenticate(
+        self, raw_token: str | None, *, ip: str | None = None, charge: bool = True
+    ) -> Principal:
+        """Resolves a token. `charge=False` verifies it without spending the rate limit:
+        the HTTP gate checks every request, the tools charge the calls."""
         if not raw_token:
             raise AuthError("missing token: use the Authorization: Bearer header")
 
         if self._bootstrap_token and raw_token == self._bootstrap_token:
             # Phase 0: full access, with no database row.
-            self._limit("bootstrap")
+            if charge:
+                self._limit("bootstrap")
             return Principal(
                 name="bootstrap",
                 scopes=frozenset({Scope.READ, Scope.WRITE}),
@@ -90,7 +99,8 @@ class Authenticator:
                 raise AuthError("token expired")
             if not _ip_allowed(ip, list(row["ip_allowlist"] or [])):
                 raise AuthError("IP address not allowed for this token")
-            self._limit(parts.prefix)
+            if charge:
+                self._limit(parts.prefix)
             await TokenRepository(connection).touch(row["id"])
 
         return Principal(

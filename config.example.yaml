@@ -80,3 +80,6 @@ limits:
   # The burst covers the batch of calls an agent makes when a session starts.
   requests_per_minute: 120
   burst: 40
+  # Failed authentications per minute and per client IP on /mcp. Past it, the
+  # server answers 429 without querying the database. 0 disables it.
+  failed_auth_per_minute: 30

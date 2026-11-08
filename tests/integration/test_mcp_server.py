@@ -548,13 +548,59 @@ async def test_a_token_cannot_reach_another_space(served: ServedInstance) -> Non
     assert "forbidden" in result.content[0].text
 
 
-async def test_an_expired_token_is_refused(served: ServedInstance) -> None:
-    async with served.session(served.tokens["stale"]) as session:
-        result = await session.call_tool("spaces_list", {})
+def _tools_list(served: ServedInstance, token: str, **headers: str) -> httpx.Response:
+    return httpx.post(
+        f"{served.base_url}/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        headers={
+            "Accept": "application/json, text/event-stream",
+            "Authorization": f"Bearer {token}",
+            **headers,
+        },
+        timeout=5,
+    )
 
-    assert result.isError
-    assert "unauthorized" in result.content[0].text
-    assert "expired" in result.content[0].text
+
+def test_an_expired_token_is_refused_at_the_gate(served: ServedInstance) -> None:
+    response = _tools_list(served, served.tokens["stale"])
+
+    assert response.status_code == 401
+    assert "expired" in response.json()["error"]
+
+
+@pytest.mark.parametrize("token", ["x", "lmd_aaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"])
+def test_an_unknown_token_never_reaches_the_tool_list(
+    served: ServedInstance, token: str
+) -> None:
+    """Anyone can send a bearer header: the handshake and the tool schemas
+    are only for a token that exists."""
+    response = _tools_list(served, token)
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.json()["error"].startswith("unauthorized")
+    assert "memory_search" not in response.text
+
+
+def test_a_valid_token_still_lists_the_tools(served: ServedInstance) -> None:
+    response = _tools_list(served, served.tokens["reader"])
+
+    assert response.status_code == 200
+    assert "memory_search" in response.text
+
+
+def test_repeated_failures_from_one_address_are_cut_off(served: ServedInstance) -> None:
+    limit = served.core.settings.limits.failed_auth_per_minute
+    flood = {"X-Forwarded-For": "203.0.113.9"}
+    for _ in range(limit):
+        assert _tools_list(served, "lmd_aaaaaaaa_nope", **flood).status_code == 401
+
+    blocked = _tools_list(served, served.tokens["reader"], **flood)
+    elsewhere = _tools_list(served, served.tokens["reader"], **{"X-Forwarded-For": "198.51.100.4"})
+
+    assert blocked.status_code == 429
+    assert blocked.headers["retry-after"] == "60"
+    assert elsewhere.status_code == 200
 
 
 async def test_a_looping_agent_is_rate_limited(served: ServedInstance) -> None:

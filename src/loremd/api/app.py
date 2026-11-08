@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .. import __version__
+from ..auth.ratelimit import RateLimiter
 from ..config import Settings, get_settings
 from ..core.service import Loremd
 from .console import build_console_router
@@ -82,7 +83,14 @@ def create_app(settings: Settings | None = None, *, core: Loremd | None = None) 
         app.include_router(build_console_router(service))
 
     # Registered last: the routes above keep their priority.
-    app.mount("/", CallContextMiddleware(mcp.streamable_http_app()))
+    failures = RateLimiter(
+        requests_per_minute=settings.limits.failed_auth_per_minute,
+        burst=settings.limits.failed_auth_per_minute,
+    )
+    app.mount(
+        "/",
+        CallContextMiddleware(mcp.streamable_http_app(), service.auth, failures),
+    )
     return app
 
 
