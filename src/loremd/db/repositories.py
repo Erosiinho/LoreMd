@@ -277,6 +277,106 @@ class MemoryIndexRepository:
         )
         return {(row["space_id"], row["status"]): int(row["n"]) for row in rows}
 
+    async def browse(
+        self,
+        space_ids: Sequence[UUID],
+        *,
+        memory_type: str | None = None,
+        status: str | None = None,
+        project: str | None = None,
+        query: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[IndexedMemory], int]:
+        """A page of memories, newest first, with the total count of the filter.
+
+        `query` matches the title or the body, case-insensitively: this is a
+        listing filter, not search, so it has no ranking and no embedding.
+        """
+        where = """
+            m.space_id = ANY($1::uuid[])
+            AND ($2::text IS NULL OR m.type = $2)
+            AND ($3::text IS NULL OR m.status = $3)
+            AND ($4::text IS NULL OR m.project = $4)
+            AND ($5::text IS NULL OR m.title ILIKE $5 OR m.content ILIKE $5)
+        """
+        pattern = None
+        if query:
+            escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+        args = [list(space_ids), memory_type, status, project, pattern]
+        total = await self.c.fetchval(f"SELECT count(*) FROM memory_index m WHERE {where}", *args)
+        rows = await self.c.fetch(
+            f"""
+            SELECT {_MEMORY_COLUMNS}
+            FROM memory_index m JOIN spaces s ON s.id = m.space_id
+            WHERE {where}
+            ORDER BY m.updated DESC, m.id DESC
+            LIMIT $6 OFFSET $7
+            """,
+            *args,
+            limit,
+            offset,
+        )
+        return [_to_indexed(row) for row in rows], int(total)
+
+    async def projects(self, space_ids: Sequence[UUID]) -> list[tuple[str, int]]:
+        """Projects that have at least one memory, with their memory count."""
+        rows = await self.c.fetch(
+            """
+            SELECT project, count(*) AS n FROM memory_index
+            WHERE space_id = ANY($1::uuid[]) AND project IS NOT NULL
+            GROUP BY project ORDER BY project
+            """,
+            list(space_ids),
+        )
+        return [(row["project"], int(row["n"])) for row in rows]
+
+    async def count_by_type(self, space_ids: Sequence[UUID]) -> dict[str, int]:
+        """Number of active memories of each type."""
+        rows = await self.c.fetch(
+            """
+            SELECT type, count(*) AS n FROM memory_index
+            WHERE space_id = ANY($1::uuid[]) AND status = 'active'
+            GROUP BY type
+            """,
+            list(space_ids),
+        )
+        return {row["type"]: int(row["n"]) for row in rows}
+
+    async def handoff_thread(
+        self, space_id: UUID, project: str | None, *, limit: int = 100
+    ) -> list[IndexedMemory]:
+        """Every handoff of one project, superseded ones included, newest first."""
+        rows = await self.c.fetch(
+            f"""
+            SELECT {_MEMORY_COLUMNS}
+            FROM memory_index m JOIN spaces s ON s.id = m.space_id
+            WHERE m.space_id = $1 AND m.type = 'handoff'
+              AND m.project IS NOT DISTINCT FROM $2::text
+            ORDER BY m.updated DESC, m.id DESC
+            LIMIT $3
+            """,
+            space_id,
+            project,
+            limit,
+        )
+        return [_to_indexed(row) for row in rows]
+
+    async def handoff_thread_lengths(
+        self, space_ids: Sequence[UUID]
+    ) -> dict[tuple[UUID, str | None], int]:
+        """Number of handoffs in each (space, project) thread."""
+        rows = await self.c.fetch(
+            """
+            SELECT space_id, project, count(*) AS n FROM memory_index
+            WHERE space_id = ANY($1::uuid[]) AND type = 'handoff'
+            GROUP BY space_id, project
+            """,
+            list(space_ids),
+        )
+        return {(row["space_id"], row["project"]): int(row["n"]) for row in rows}
+
     async def latest_per_project(
         self,
         space_ids: Sequence[UUID],

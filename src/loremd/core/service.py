@@ -16,6 +16,7 @@ from ..db import Database
 from ..embeddings import EmbeddingProvider, build_provider
 from ..errors import ConfigError
 from .audit import AuditService
+from .browse import BrowseService
 from .handoffs import HandoffService
 from .indexer import Indexer
 from .memories import MemoryService
@@ -67,6 +68,7 @@ class Loremd:
         self.handoffs = HandoffService(
             self.db, self.spaces, self.memories, self.search, self.audit, self.settings
         )
+        self.browse = BrowseService(self.db, self.spaces)
         self.limiter = RateLimiter(
             requests_per_minute=self.settings.limits.requests_per_minute,
             burst=self.settings.limits.burst,
