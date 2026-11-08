@@ -7,6 +7,10 @@ server:
   port: 8000
   # Public URL advertised to agents (used in the connection docs).
   public_url: https://memory.acme.com
+  # The MCP endpoint only answers requests whose Host header is the host of
+  # public_url (or localhost): a guard against DNS rebinding. List here any
+  # other host it is reached under, e.g. an internal name.
+  allowed_hosts: []
 
 database:
   dsn: postgresql://loremd:loremd@postgres:5432/loremd

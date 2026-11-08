@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlsplit
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from ..auth.principal import Principal
+from ..config import Settings
 from ..core.models import MemoryType
 from ..core.service import Loremd
 from ..errors import LoremdError
@@ -40,6 +43,35 @@ def _fail(error: LoremdError) -> ToolFailure:
     return ToolFailure(f"{error.code}: {error}")
 
 
+#: Always accepted, so a local client or a health probe on the box keeps working.
+LOCAL_HOSTS = ("127.0.0.1:*", "localhost:*", "[::1]:*")
+LOCAL_ORIGINS = ("http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*")
+
+
+def transport_security(settings: Settings) -> TransportSecuritySettings:
+    """DNS rebinding protection, told which public host this instance answers on.
+
+    The SDK only knows localhost by default and answers 421 to anything else,
+    which breaks every deployment behind a proxy. The public host comes from
+    `server.public_url`, extra ones from `server.allowed_hosts`: nothing about a
+    given deployment lives in the code.
+    """
+    hosts = list(LOCAL_HOSTS) + ["127.0.0.1", "localhost", "[::1]"]
+    origins = list(LOCAL_ORIGINS)
+    public = urlsplit(settings.server.public_url)
+    if public.netloc:
+        hosts.append(public.netloc)
+        origins.append(f"{public.scheme}://{public.netloc}")
+    for host in settings.server.allowed_hosts:
+        hosts.append(host)
+        origins.extend((f"https://{host}", f"http://{host}"))
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=list(dict.fromkeys(hosts)),
+        allowed_origins=list(dict.fromkeys(origins)),
+    )
+
+
 def build_mcp(core: Loremd) -> FastMCP:
     """Builds the MCP server wired to an already configured core."""
 
@@ -48,6 +80,7 @@ def build_mcp(core: Loremd) -> FastMCP:
         instructions=SERVER_INSTRUCTIONS,
         stateless_http=True,
         json_response=False,
+        transport_security=transport_security(core.settings),
     )
 
     async def principal() -> Principal:

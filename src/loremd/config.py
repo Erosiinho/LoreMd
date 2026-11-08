@@ -24,6 +24,9 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     public_url: str = "http://localhost:8000"
+    #: Extra Host header values the MCP endpoint accepts, on top of the host of
+    #: `public_url` and localhost (e.g. `memory.internal:8443`).
+    allowed_hosts: list[str] = Field(default_factory=list)
 
 
 class DatabaseConfig(BaseModel):
