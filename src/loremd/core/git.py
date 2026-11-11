@@ -42,8 +42,8 @@ def identity_env(author_name: str, author_email: str) -> dict[str, str]:
     `-c user.name` is not enough: `GIT_AUTHOR_NAME` and friends already present
     in the environment take precedence over any config, so a host that exports
     them would silently sign every agent commit with its own identity. Setting
-    these variables explicitly is the only way to be sure the author is the
-    agent, which principle 5 of the plan requires.
+    these variables explicitly is the only way to be sure the author in
+    `git log` is the agent.
     """
     name = author_name.strip() or FALLBACK_IDENTITY[0]
     email = author_email.strip() or FALLBACK_IDENTITY[1]
